@@ -18,7 +18,7 @@ WEREWOLF = Role("Werewolf", Alignment.WOLF, night_action=True)
 SEER = Role("Seer", Alignment.VILLAGE, night_action=True)
 DOCTOR = Role("Doctor", Alignment.VILLAGE, night_action=True)
 
-# Phase 1
+# Big set
 WITCH = Role("Witch", Alignment.VILLAGE, night_action=True)
 CUPID = Role("Cupid", Alignment.VILLAGE, night_action=True)
 TOUGH_GUY = Role("Tough Guy", Alignment.VILLAGE, night_action=False)
@@ -33,7 +33,6 @@ SPELLCASTER = Role("Spellcaster", Alignment.VILLAGE, night_action=True)
 PACIFIST = Role("Pacifist", Alignment.VILLAGE, night_action=False)
 GHOST = Role("Ghost", Alignment.VILLAGE, night_action=False)
 
-# Phase 2
 APPRENTICE_SEER = Role("Apprentice Seer", Alignment.VILLAGE, night_action=False)
 AURA_SEER = Role("Aura Seer", Alignment.VILLAGE, night_action=True)
 LYCAN = Role("Lycan", Alignment.VILLAGE, night_action=False)
@@ -50,7 +49,6 @@ VILLAGE_IDIOT = Role("Village Idiot", Alignment.VILLAGE, night_action=False)
 TANNER = Role("Tanner", Alignment.NEUTRAL, night_action=False)
 LONE_WOLF = Role("Lone wolf", Alignment.WOLF, night_action=True)
 
-# Phase 3
 CULT_LEADER = Role("Cult Leader", Alignment.NEUTRAL, night_action=True)
 
 ALL_ROLES = [
@@ -61,15 +59,3 @@ ALL_ROLES = [
 ]
 
 ROLE_BY_NAME = {r.name.lower(): r for r in ALL_ROLES}
-
-DEFAULT_ROLESET = [
-    VILLAGER, VILLAGER, VILLAGER,
-    WEREWOLF, WEREWOLF,
-    SEER, DOCTOR,
-    WITCH, BODYGUARD,
-    CUPID, TOUGH_GUY,
-    APPRENTICE_SEER, AURA_SEER,
-    LYCAN, CURSED, DISEASED,
-    MAYOR, PRIEST,
-    CULT_LEADER,
-]
