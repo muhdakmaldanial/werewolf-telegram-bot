@@ -64,7 +64,7 @@ async def handle_proceed_day(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     winner = game.is_over()
     text = res + (f" {winner}." if winner else "")
     try:
-        await q.edit_message_text("Proceeding to day now.")
+        await q.edit_message_text("✅ Proceed ke siang sekarang.")
     except Exception:
         pass
     await ctx.bot.send_message(chat_id=chat_id, text=text)
@@ -107,12 +107,12 @@ async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # Gen Z bilingual how to play, split and pinned
 async def cmd_howtoplay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parts = [
-        "Selamat datang ke Werewolf Chaos Deck, semua role masuk sekali. Mission, survive, tipu orang, conquer kampung. Have fun and do not leak your role.",
-        "Player count, nak game yang lit, kena cukup player. Min, 8. Recommended, 12 to 20. Max, 24 untuk fun, 30 ke atas kalau kau memang nak chaos.",
-        "Game flow, Day, sembang, tuduh, vote. Night, role special jalan kerja dalam DM, bunuh, protect, intip, recruit. Ulang sampai ada pemenang.",
-        "Main di group, guna button bawah chat. /join untuk masuk, /status untuk tengok pemain, /listalive untuk tengok yang hidup, host guna /startgame, /tally, /endday, /modboard.",
-        "DM actions, kalau kau ada role, taip command atau biar bot bagi butang sasaran. /kill, /peek, /aura, /save, /protect, /heal, /poison, /bless, /scry, /bite, /recruit.",
-        "Tips, check DM waktu malam, gunakan nombor dari /listalive untuk sasaran cepat, act natural kalau jahat, trust no one, trust the bot."
+        "🐺 Selamat datang ke Werewolf Chaos Deck, semua role sekali, mission, survive, tipu orang, conquer kampung, have fun, jangan bocor role.",
+        "📊 Player count, nak game lit, kena cukup player, min 8, best 12 hingga 20, max 24 untuk fun, 30 ke atas kalau kau memang nak chaos.",
+        "🔁 Game flow, siang, sembang, tuduh, vote, malam, role special jalan kerja dalam DM, bunuh, protect, intip, recruit, ulang sampai ada pemenang.",
+        "🧭 Main di group, guna button bawah chat, /join untuk masuk, /status untuk tengok pemain, /listalive untuk yang hidup, host guna /startgame, /tally, /endday, /modboard.",
+        "🎯 DM actions, kalau ada role, boleh taip command atau guna butang sasaran, /kill, /peek, /aura, /save, /protect, /heal, /poison, /bless, /scry, /bite, /recruit.",
+        "💡 Tips, check DM waktu malam, guna nombor dari /listalive untuk sasaran cepat, act natural kalau jahat, trust no one, trust the bot."
     ]
     sent0 = await update.effective_message.reply_text(parts[0])
     try:
@@ -163,7 +163,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     last = game.name_of(game.last_killed) if game.last_killed else "None"
     alive_names = [p.name for p in game.players.values() if p.alive]
     await update.effective_message.reply_text(
-        f"Status, phase, {phase}, day, {day}, last killed, {last}. Alive count, {len(alive_names)}."
+        f"📊 Status, phase, {phase}, day, {day}, last out, {last}. Alive, {len(alive_names)}."
     )
 
 async def cmd_votes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -176,7 +176,7 @@ async def cmd_votes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("It is not day.")
         return
     done, total = game.votes_progress()
-    await update.effective_message.reply_text(f"Votes, {done} of {total} submitted. Use /tally to view counts.")
+    await update.effective_message.reply_text(f"🗳 Progres undi, {done} dari {total} siap. Guna /tally untuk kiraan.")
 
 async def cmd_pending(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -191,7 +191,7 @@ async def cmd_pending(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     items = game.pending_summary()
     txt = "Pending\n" + "\n".join(items)
     if items == ["All required night actions are in"] and game.phase == "night":
-        await update.effective_message.reply_text(txt + "\nAuto, will proceed to day in 45 seconds.", reply_markup=proceed_button(chat.id))
+        await update.effective_message.reply_text(txt + "\n⚡ Semua action masuk, auto proceed ke siang dalam 45 saat ⏳", reply_markup=proceed_button(chat.id))
         await schedule_autoday(chat.id, ctx, delay_secs=45)
     else:
         await update.effective_message.reply_text(txt)
@@ -304,7 +304,12 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     await ctx.bot.send_message(chat_id=pid, text="Quick targets", reply_markup=targets_keyboard(game, action_map[p.role]))
             except Exception as e:
                 log.warning("Failed to DM player %s, %s", p.name, e)
-        await update.effective_message.reply_text("Night has begun. Use /howtoplay for the guide.")
+        await update.effective_message.reply_text("🌙 Malam bermula, check DM untuk aksi. Aku akan pin cara main untuk semua.")
+        # Auto show and pin the Gen Z how-to-play
+        try:
+            await cmd_howtoplay(update, ctx)
+        except Exception as e:
+            log.info("Auto howtoplay failed, %s", e)
 
 async def cmd_day(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -352,10 +357,10 @@ async def cmd_tally(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     game = GAMES[chat.id]
     t = game.tally()
     if not t:
-        await update.effective_message.reply_text("No votes yet.")
+        await update.effective_message.reply_text("🗳 Belum ada undian.")
         return
     lines = [f"{game.name_of(pid)}: {count}" for pid, count in t.items()]
-    await update.effective_message.reply_text("Votes\n" + "\n".join(lines))
+    await update.effective_message.reply_text("🧮 Kiraan undi\n" + "\n".join(lines))
 
 async def cmd_endday(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
