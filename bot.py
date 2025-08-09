@@ -11,6 +11,46 @@ log = logging.getLogger("werewolf-bot")
 GAMES: Dict[int, Game] = {}
 CHAOS_DECK = ALL_ROLES
 
+ROLE_EMOJI = {
+    "Seer": "🔮",
+    "Apprentice Seer": "🧑‍🔮",
+    "Aura Seer": "✨🔮",
+    "Bodyguard": "🛡",
+    "Cult Leader": "✝️",
+    "Cupid": "💘",
+    "Cursed": "😈",
+    "Diseased": "🤒",
+    "Doppleganger": "🪞",
+    "Drunk": "🍺",
+    "Ghost": "👻",
+    "Hoodlum": "😎",
+    "Hunter": "🎯",
+    "Lone wolf": "🐺",
+    "Lycan": "🐺🌕",
+    "Mason": "🧱",
+    "Mayor": "🎩",
+    "Minion": "🤏😈",
+    "Old Hag": "👵",
+    "Paranormal Investigator": "🕵️‍♂️👻",
+    "Pacifist": "✌️",
+    "Priest": "✝️🕊",
+    "Prince": "👑",
+    "Sorceress": "🧙‍♀️",
+    "Spellcaster": "🪄",
+    "Tanner": "🧥",
+    "Tough Guy": "💪",
+    "Troublemaker": "🌀",
+    "Vampire": "🦇",
+    "Village Idiot": "🤪",
+    "Villager": "🏡",
+    "Werewolf": "🐺",
+    "Witch": "🧹",
+    "Wolf Cub": "🐺🐾"
+}
+def role_emoji(name: str) -> str:
+    return ROLE_EMOJI.get(name, "🎭")
+
+
 AUTO_TASKS: Dict[int, asyncio.Task] = {}
 
 def cancel_autoday(chat_id: int):
@@ -93,13 +133,14 @@ def targets_keyboard(game: Game, action: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 def build_modboard_text(game: Game) -> str:
-    lines = []
-    for p in game.players.values():
+    lines = ["🛠 Moderator Board"]
+    for i, p in enumerate(game.players.values(), start=1):
         role_name = p.role.name if p.role else "Unassigned"
+        emoji = role_emoji(role_name)
         status = "Alive" if p.alive else "Dead"
-        cult_tag = ", Cult" if p.user_id in game.cult else ""
-        lines.append(f"{p.name}, {role_name}{cult_tag}, {status}")
-    return "Moderator board\n" + "\n".join(lines)
+        cult_tag = " , Cult" if p.user_id in game.cult else ""
+        lines.append(f"{i}. {p.name} , {emoji} {role_name}{cult_tag} , {status}")
+    return "\n".join(lines)
 
 async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("Pong, bot is online.")
@@ -432,6 +473,44 @@ async def cmd_scry(update: Update, ctx: ContextTypes.DEFAULT_TYPE):   await _sin
 async def cmd_bite(update: Update, ctx: ContextTypes.DEFAULT_TYPE):   await _single_target_cmd(update, ctx, "bite", "vampire_bite")
 async def cmd_recruit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):await _single_target_cmd(update, ctx, "recruit", "cult_recruit")
 
+
+async def cmd_cheatroles(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat = update.effective_chat
+    game = None
+    if chat and chat.id in GAMES and GAMES[chat.id].host_id == user.id:
+        game = GAMES[chat.id]
+    else:
+        for g in GAMES.values():
+            if g.host_id == user.id:
+                game = g
+                break
+    if not game:
+        await update.effective_message.reply_text("You are not a host in any active game.")
+        return
+
+    lines = ["🎭 Cheat Roles Board , Host Only", "Ssshhh jangan bagitau orang lain 👀", ""]
+    if not game.players:
+        lines.append("No players yet.")
+    else:
+        for i, p in enumerate(game.players.values(), start=1):
+            role_name = p.role.name if p.role else "Unassigned"
+            emoji = role_emoji(role_name)
+            lines.append(f"{i}. {p.name} , {emoji} {role_name}")
+    msg = "\\n".join(lines)
+
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔒 Close", callback_data="close_message")]])
+
+    if chat and chat.type != Chat.PRIVATE:
+        try:
+            await ctx.bot.send_message(chat_id=user.id, text=msg, reply_markup=kb)
+            await update.effective_message.reply_text("I sent the cheat board to your DM.")
+        except Exception:
+            await update.effective_message.reply_text("I could not DM you, start a private chat with me first, then run /cheatroles again.")
+    else:
+        await update.effective_message.reply_text(msg, reply_markup=kb)
+
+
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     secret = os.getenv("WEBHOOK_SECRET", "dev-secret")
@@ -465,9 +544,14 @@ def main():
     app.add_handler(CommandHandler("tally", cmd_tally))
     app.add_handler(CommandHandler("endday", cmd_endday))
     app.add_handler(CommandHandler("modboard", cmd_modboard))
+    app.add_handler(CommandHandler("cheatroles", cmd_cheatroles))
+    app.add_handler(CommandHandler("exitgame", cmd_exitgame))
 
     app.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^(kill|peek|aura|save|protect|heal|poison|bless|scry|bite|recruit):\d+$"))
     app.add_handler(CallbackQueryHandler(handle_proceed_day, pattern=r"^proceed_day:\d+$"))
+    app.add_handler(CallbackQueryHandler(handle_exit_confirm, pattern=r"^exit_confirm:\d+:(yes|no)$"))
+    app.add_handler(CallbackQueryHandler(handle_start_newgame, pattern=r"^start_newgame:\d+$"))
+    app.add_handler(CallbackQueryHandler(lambda u,c: u.callback_query.message.delete(), pattern=r"^close_message$"))
     app.add_handler(CommandHandler("kill", cmd_kill))
     app.add_handler(CommandHandler("peek", cmd_peek))
     app.add_handler(CommandHandler("aura", cmd_aura))
