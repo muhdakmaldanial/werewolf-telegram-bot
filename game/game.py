@@ -116,7 +116,7 @@ class Game:
         self.day_votes.clear()
         self.silenced_today.clear()
         self.bound_next_night.clear()
-        return "Roles assigned, night begins."
+        return "🌙 Malam bermula, role semua siap sedia."
 
     def living(self) -> List[Player]:
         return [p for p in self.players.values() if p.alive]
@@ -258,14 +258,14 @@ class Game:
         tally = self.tally()
         if not tally:
             self.phase = "night"
-            return "No votes, night begins."
+            return "⏳ Tak ada undian, terus sambung malam, fokus DM korang."
 
         max_votes = max(tally.values())
         top = [t for t, v in tally.items() if v == max_votes]
 
         if len(top) > 1 or max_votes == 0:
             self.phase = "night"
-            return "Tie, no one is lynched. Night begins."
+            return "🤝 Seri, tak ada yang kena keluar, sambung malam sekarang."
 
         target = top[0]
         victim = self.players[target]
@@ -274,11 +274,11 @@ class Game:
             self.prince_revealed.add(target)
             self.phase = "night"
             self.day_votes.clear()
-            return f"{victim.name} is the Prince, lynch cancelled. Night begins."
+            return f"👑 {victim.name} rupanya Prince, batal undi, sambung malam."
 
         if victim.role is TANNER:
             self.phase = "over"
-            return f"{victim.name} was lynched. Tanner wins."
+            return f"🟠 {victim.name} kena undi keluar, Tanner menang, GG."
 
         victim.alive = False
         self.wolf_cub_lynched_yesterday = (victim.role is WOLF_CUB)
@@ -292,5 +292,5 @@ class Game:
         winner = self.is_over()
         if winner:
             self.phase = "over"
-            return f"{victim.name} was lynched. {winner}."
-        return f"{victim.name} was lynched.{hunter_text} Night begins."
+            return f"📢 {victim.name} kena undi keluar. {winner}."
+        return f"📢 {victim.name} kena undi keluar.{hunter_text} 🌙 Sambung malam."
