@@ -191,32 +191,27 @@ class Game:
             return sub[0].user_id
         return None
 
-    # Pending action helpers
-    def role_alive_ids(self, role: Role) -> List[int]:
-        return [p.user_id for p in self.players.values() if p.alive and p.role is role]
-
     def pending_summary(self) -> List[str]:
         out: List[str] = []
         if self.phase != "night":
             return ["Night actions are not pending, it is not night."]
-        # Wolves, one collective action, consider pending if no vote yet
         if not self.wolf_votes and any(self.players[pid].alive and self.players[pid].role in (WEREWOLF, WOLF_CUB, LONE_WOLF) for pid in self.wolves):
             out.append("Wolves, pending")
-        if self.seer_target is None and self.role_alive_ids(SEER):
+        if self.seer_target is None and any(p.alive and p.role is SEER for p in self.players.values()):
             out.append("Seer, pending")
-        if self.aura_target is None and self.role_alive_ids(AURA_SEER):
+        if self.aura_target is None and any(p.alive and p.role is AURA_SEER for p in self.players.values()):
             out.append("Aura Seer, pending")
-        if self.doctor_target is None and self.role_alive_ids(DOCTOR):
+        if self.doctor_target is None and any(p.alive and p.role is DOCTOR for p in self.players.values()):
             out.append("Doctor, pending")
-        if self.bodyguard_target is None and self.role_alive_ids(BODYGUARD):
+        if self.bodyguard_target is None and any(p.alive and p.role is BODYGUARD for p in self.players.values()):
             out.append("Bodyguard, pending")
-        if self.witch_heal_available and self.witch_heal_target is None and self.role_alive_ids(WITCH):
+        if self.witch_heal_available and self.witch_heal_target is None and any(p.alive and p.role is WITCH for p in self.players.values()):
             out.append("Witch heal, available, optional")
-        if self.witch_poison_available and self.witch_poison_target is None and self.role_alive_ids(WITCH):
+        if self.witch_poison_available and self.witch_poison_target is None and any(p.alive and p.role is WITCH for p in self.players.values()):
             out.append("Witch poison, available, optional")
-        if self.priest_target is None and self.role_alive_ids(PRIEST):
+        if self.priest_target is None and any(p.alive and p.role is PRIEST for p in self.players.values()):
             out.append("Priest, pending")
-        if self.sorceress_target is None and self.role_alive_ids(SORCERESS):
+        if self.sorceress_target is None and any(p.alive and p.role is SORCERESS for p in self.players.values()):
             out.append("Sorceress, pending")
         if self.vampire_target is None and any(pid in self.vampires and self.players[pid].alive for pid in self.vampires):
             out.append("Vampire, pending")
@@ -224,7 +219,6 @@ class Game:
             out.append("Cult Leader, pending")
         return out or ["All required night actions are in"]
 
-    # Day mechanics
     def vote(self, voter_id: int, target_id: int) -> str:
         if self.phase != "day":
             return "It is not day."
@@ -294,3 +288,134 @@ class Game:
             self.phase = "over"
             return f"📢 {victim.name} kena undi keluar. {winner}."
         return f"📢 {victim.name} kena undi keluar.{hunter_text} 🌙 Sambung malam."
+
+    def resolve_night(self) -> str:
+        if self.old_hag_target and self.players.get(self.old_hag_target, Player(0,"")).alive:
+            self.silenced_today = {self.old_hag_target}
+        else:
+            self.silenced_today = set()
+
+        kills: List[int] = []
+        if not self.wolves_skip_kill_tonight and self.wolf_votes:
+            tally: Dict[int, int] = {}
+            for t in self.wolf_votes.values():
+                tally[t] = tally.get(t, 0) + 1
+            max_votes = max(tally.values())
+            top = [t for t, v in tally.items() if v == max_votes]
+            target = random.choice(top)
+            kills.append(target)
+        self.wolves_skip_kill_tonight = False
+
+        protected: Set[int] = set()
+        if self.doctor_target:
+            protected.add(self.doctor_target)
+        if self.bodyguard_target:
+            protected.add(self.bodyguard_target)
+            self.bodyguard_last_target = self.bodyguard_target
+        if self.priest_target:
+            protected.add(self.priest_target)
+
+        if self.witch_heal_target is not None and self.witch_heal_available:
+            kills = [k for k in kills if k != self.witch_heal_target]
+            protected.add(self.witch_heal_target)
+            self.witch_heal_available = False
+
+        cult_converted: Optional[int] = None
+        if self.cult_target is not None:
+            t = self.players.get(self.cult_target)
+            if t and t.alive:
+                if t.user_id in protected or t.user_id in self.wolves or t.user_id in self.vampires:
+                    pass
+                else:
+                    self.cult.add(t.user_id)
+                    cult_converted = t.user_id
+
+        vamp_converted: Optional[int] = None
+        if self.vampire_target is not None:
+            t = self.players.get(self.vampire_target)
+            if t and t.alive:
+                if t.user_id in protected:
+                    pass
+                else:
+                    if t.role.alignment is Alignment.VILLAGE and t.role not in (PRIEST, SEER, APPRENTICE_SEER, AURA_SEER, BODYGUARD, WITCH, DOCTOR):
+                        t.role = VAMPIRE
+                        self.vampires.add(t.user_id)
+                        vamp_converted = t.user_id
+                    else:
+                        t.alive = False
+                        died = t.user_id
+                        if died not in kills:
+                            kills.append(died)
+
+        died_tonight: List[int] = []
+        diseased_killed = False
+        for target in kills:
+            if target in protected:
+                continue
+            victim = self.players.get(target)
+            if not victim or not victim.alive:
+                continue
+            if victim.role is TOUGH_GUY:
+                self.tough_guy_pending_death = target
+                continue
+            if victim.role is CURSED:
+                victim.role = WEREWOLF
+                self.wolves.add(victim.user_id)
+                continue
+            if victim.role is DISEASED:
+                diseased_killed = True
+            victim.alive = False
+            died_tonight.append(target)
+
+        if diseased_killed:
+            self.wolves_skip_kill_tonight = True
+
+        if self.witch_poison_target is not None and self.witch_poison_available:
+            t = self.players.get(self.witch_poison_target)
+            if t and t.alive and t.user_id not in protected:
+                t.alive = False
+                died_tonight.append(self.witch_poison_target)
+            self.witch_poison_available = False
+
+        if self.lovers:
+            a, b = self.lovers
+            a_dead = a in died_tonight or not self.players[a].alive
+            b_dead = b in died_tonight or not self.players[b].alive
+            if a_dead and self.players[b].alive:
+                self.players[b].alive = False
+                died_tonight.append(b)
+            elif b_dead and self.players[a].alive:
+                self.players[a].alive = False
+                died_tonight.append(a)
+
+        self.wolf_votes.clear()
+        self.seer_target = None
+        self.aura_target = None
+        self.sorceress_target = None
+        self.priest_target = None
+        self.pii_first = None
+        self.pii_second = None
+        self.doctor_target = None
+        self.bodyguard_target = None
+        self.witch_heal_target = None
+        self.witch_poison_target = None
+        self.old_hag_target = None
+        self.vampire_target = None
+        self.cult_target = None
+
+        self.last_killed = died_tonight[-1] if died_tonight else None
+        self.phase = "day"
+        self.day_votes.clear()
+        self.day_count += 1
+
+        parts = []
+        if died_tonight:
+            parts.append(f"💀 {', '.join(self.name_of(x) for x in died_tonight)} tumbang waktu malam.")
+        if vamp_converted is not None:
+            parts.append(f"🧛 {self.name_of(vamp_converted)} kena bite, jadi vampire geng.")
+        if cult_converted is not None:
+            parts.append(f"🔮 {self.name_of(cult_converted)} join cult, jangan bocor rahsia.")
+        if not parts:
+            parts.append("👍 Malam ni selamat, tak ada yang tumbang.")
+        parts.append("🌞 Siang bermula, masa borak dan vote.")
+        return " ".join(parts)
