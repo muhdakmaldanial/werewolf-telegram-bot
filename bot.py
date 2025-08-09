@@ -115,7 +115,7 @@ async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_howtoplay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parts = [
         "🐺 Selamat datang ke Werewolf Chaos Deck, semua role sekali, mission, survive, tipu orang, conquer kampung, have fun, jangan bocor role.",
-        "📊 Player count, nak game lit, kena cukup player, min 5, best 12 hingga 20, max 24 untuk fun, 30 ke atas kalau kau memang nak chaos.",
+        "📊 Player count, nak game lit, kena cukup player, min 8, best 12 hingga 20, max 24 untuk fun, 30 ke atas kalau kau memang nak chaos.",
         "🔁 Game flow, siang, sembang, tuduh, vote, malam, role special jalan kerja dalam DM, bunuh, protect, intip, recruit, ulang sampai ada pemenang.",
         "🧭 Main di group, guna button bawah chat, /join untuk masuk, /status untuk tengok pemain, /listalive untuk yang hidup, host guna /startgame, /tally, /endday, /modboard.",
         "🎯 DM actions, kalau ada role, boleh taip command atau guna butang sasaran, /kill, /peek, /aura, /save, /protect, /heal, /poison, /bless, /scry, /bite, /recruit.",
@@ -312,15 +312,11 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(game.players) < 5:
         await update.effective_message.reply_text("⚠ Minimum 5 players diperlukan, jom ajak kawan lagi, at least 5.")
         return
-
-
     roleset = CHAOS_DECK
     res = game.assign_roles(roleset)
     await update.effective_message.reply_text(res)
     if game.phase == "night":
-        await update.effective_message.reply_text(
-            f"Starting game with Chaos Deck. Players, {len(game.players)}. Assigning roles from the full deck."
-        )
+        await update.effective_message.reply_text(f"Starting game with Chaos Deck. Players, {len(game.players)}. Assigning roles from the full deck.")
         mason_names = [game.players[m].name for m in game.masons]
         for pid, p in game.players.items():
             try:
@@ -362,7 +358,7 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await cmd_howtoplay(update, ctx)
         except Exception as e:
             log.info("Auto howtoplay failed, %s", e)
-            
+
 async def cmd_day(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat is None or chat.id not in GAMES:
