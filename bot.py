@@ -298,9 +298,6 @@ async def cmd_mayor(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(f"{p.name} reveals as Mayor. Their vote counts double.")
 
 async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if len(game.players) < 5:
-    await update.effective_message.reply_text("⚠️ Kena ada minimum 6 orang baru boleh start game. Jom ajak kawan lagi!")
-    return
     chat = update.effective_chat
     user = update.effective_user
     if chat is None or chat.id not in GAMES:
@@ -310,11 +307,19 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if user.id != game.host_id:
         await update.effective_message.reply_text("Only the host can start the game.")
         return
+
+    # minimum players check
+    if len(game.players) < 5:
+        await update.effective_message.reply_text("⚠ Minimum 6 players diperlukan, jom ajak kawan lagi, at least 6.")
+        return
+
     roleset = CHAOS_DECK
     res = game.assign_roles(roleset)
     await update.effective_message.reply_text(res)
     if game.phase == "night":
-        await update.effective_message.reply_text(f"Starting game with Chaos Deck. Players, {len(game.players)}. Assigning roles from the full deck.")
+        await update.effective_message.reply_text(
+            f"Starting game with Chaos Deck. Players, {len(game.players)}. Assigning roles from the full deck."
+        )
         mason_names = [game.players[m].name for m in game.masons]
         for pid, p in game.players.items():
             try:
@@ -356,7 +361,7 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await cmd_howtoplay(update, ctx)
         except Exception as e:
             log.info("Auto howtoplay failed, %s", e)
-
+            
 async def cmd_day(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat is None or chat.id not in GAMES:
