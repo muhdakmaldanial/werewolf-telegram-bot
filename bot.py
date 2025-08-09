@@ -115,7 +115,7 @@ async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_howtoplay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parts = [
         "🐺 Selamat datang ke Werewolf Chaos Deck, semua role sekali, mission, survive, tipu orang, conquer kampung, have fun, jangan bocor role.",
-        "📊 Player count, nak game lit, kena cukup player, min 8, best 12 hingga 20, max 24 untuk fun, 30 ke atas kalau kau memang nak chaos.",
+        "📊 Player count, nak game lit, kena cukup player, min 5, best 12 hingga 20, max 24 untuk fun, 30 ke atas kalau kau memang nak chaos.",
         "🔁 Game flow, siang, sembang, tuduh, vote, malam, role special jalan kerja dalam DM, bunuh, protect, intip, recruit, ulang sampai ada pemenang.",
         "🧭 Main di group, guna button bawah chat, /join untuk masuk, /status untuk tengok pemain, /listalive untuk yang hidup, host guna /startgame, /tally, /endday, /modboard.",
         "🎯 DM actions, kalau ada role, boleh taip command atau guna butang sasaran, /kill, /peek, /aura, /save, /protect, /heal, /poison, /bless, /scry, /bite, /recruit.",
@@ -310,8 +310,9 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # minimum players check
     if len(game.players) < 5:
-        await update.effective_message.reply_text("⚠ Minimum 6 players diperlukan, jom ajak kawan lagi, at least 6.")
+        await update.effective_message.reply_text("⚠ Minimum 5 players diperlukan, jom ajak kawan lagi, at least 5.")
         return
+
 
     roleset = CHAOS_DECK
     res = game.assign_roles(roleset)
