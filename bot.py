@@ -50,7 +50,6 @@ ROLE_EMOJI = {
 def role_emoji(name: str) -> str:
     return ROLE_EMOJI.get(name, "🎭")
 
-
 AUTO_TASKS: Dict[int, asyncio.Task] = {}
 
 def cancel_autoday(chat_id: int):
@@ -79,38 +78,6 @@ async def schedule_autoday(chat_id: int, ctx: ContextTypes.DEFAULT_TYPE, delay_s
 
 def proceed_button(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("Proceed to Day", callback_data=f"proceed_day:{chat_id}")]])
-
-async def handle_proceed_day(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    data = q.data or ""
-    try:
-        _, chat_id_str = data.split(":")
-        chat_id = int(chat_id_str)
-    except Exception:
-        return
-    game = GAMES.get(chat_id)
-    if not game:
-        await q.edit_message_text("No active game here.")
-        return
-    if q.from_user.id != game.host_id:
-        await q.edit_message_text("Only the host can proceed to day.")
-        return
-    if game.phase != "night":
-        await q.edit_message_text("It is not night.")
-        return
-    cancel_autoday(chat_id)
-    res = game.resolve_night()
-    winner = game.is_over()
-    text = res + (f" {winner}." if winner else "")
-    try:
-        await q.edit_message_text("✅ Proceed ke siang sekarang.")
-    except Exception:
-        pass
-    await ctx.bot.send_message(chat_id=chat_id, text=text)
-    if game.phase != "over":
-        await ctx.bot.send_message(chat_id=chat_id, text="Day phase. Use, /vote <name or number>. Host can /tally and /endday.")
-
 
 def mention(u: User) -> str:
     return f"@{u.username}" if u.username else u.full_name
@@ -145,7 +112,6 @@ def build_modboard_text(game: Game) -> str:
 async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("Pong, bot is online.")
 
-# Gen Z bilingual how to play, split and pinned
 async def cmd_howtoplay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parts = [
         "🐺 Selamat datang ke Werewolf Chaos Deck, semua role sekali, mission, survive, tipu orang, conquer kampung, have fun, jangan bocor role.",
@@ -163,7 +129,7 @@ async def cmd_howtoplay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await asyncio.sleep(0.5)
     for txt in parts[1:]:
         await update.effective_chat.send_message(txt)
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(0.3)
 
 async def cmd_modboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -192,6 +158,47 @@ async def cmd_modboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         await update.effective_message.reply_text(text)
 
+async def cmd_cheatroles(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat = update.effective_chat
+    game = None
+    if chat and chat.id in GAMES and GAMES[chat.id].host_id == user.id:
+        game = GAMES[chat.id]
+    else:
+        for g in GAMES.values():
+            if g.host_id == user.id:
+                game = g
+                break
+    if not game:
+        await update.effective_message.reply_text("You are not a host in any active game.")
+        return
+    lines = ["🎭 Cheat Roles Board , Host Only", "Ssshhh jangan bagitau orang lain 👀", ""]
+    if not game.players:
+        lines.append("No players yet.")
+    else:
+        for i, p in enumerate(game.players.values(), start=1):
+            role_name = p.role.name if p.role else "Unassigned"
+            emoji = role_emoji(role_name)
+            lines.append(f"{i}. {p.name} , {emoji} {role_name}")
+    msg = "\n".join(lines)
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔒 Close", callback_data="close_message")]])
+    if chat and chat.type != Chat.PRIVATE:
+        try:
+            await ctx.bot.send_message(chat_id=user.id, text=msg, reply_markup=kb)
+            await update.effective_message.reply_text("I sent the cheat board to your DM.")
+        except Exception:
+            await update.effective_message.reply_text("I could not DM you, start a private chat with me first, then run /cheatroles again.")
+    else:
+        await update.effective_message.reply_text(msg, reply_markup=kb)
+
+async def close_message_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try:
+        await q.message.delete()
+    except Exception:
+        pass
+    await q.answer()
+
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
@@ -203,9 +210,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     day = game.day_count
     last = game.name_of(game.last_killed) if game.last_killed else "None"
     alive_names = [p.name for p in game.players.values() if p.alive]
-    await update.effective_message.reply_text(
-        f"📊 Status, phase, {phase}, day, {day}, last out, {last}. Alive, {len(alive_names)}."
-    )
+    await update.effective_message.reply_text(f"📊 Status, phase, {phase}, day, {day}, last out, {last}. Alive, {len(alive_names)}.")
 
 async def cmd_votes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -230,7 +235,7 @@ async def cmd_pending(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("Only the host can view pending actions.")
         return
     items = game.pending_summary()
-    txt = "Pending\n" + "\n".join(items)
+    txt = "⏳ Pending\n" + "\n".join(items)
     if items == ["All required night actions are in"] and game.phase == "night":
         await update.effective_message.reply_text(txt + "\n⚡ Semua action masuk, auto proceed ke siang dalam 45 saat ⏳", reply_markup=proceed_button(chat.id))
         await schedule_autoday(chat.id, ctx, delay_secs=45)
@@ -306,9 +311,7 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     res = game.assign_roles(roleset)
     await update.effective_message.reply_text(res)
     if game.phase == "night":
-        await update.effective_message.reply_text(
-            f"Starting game with Chaos Deck. Players, {len(game.players)}. Assigning roles from the full deck."
-        )
+        await update.effective_message.reply_text(f"Starting game with Chaos Deck. Players, {len(game.players)}. Assigning roles from the full deck.")
         mason_names = [game.players[m].name for m in game.masons]
         for pid, p in game.players.items():
             try:
@@ -346,7 +349,6 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 log.warning("Failed to DM player %s, %s", p.name, e)
         await update.effective_message.reply_text("🌙 Malam bermula, check DM untuk aksi. Aku akan pin cara main untuk semua.")
-        # Auto show and pin the Gen Z how-to-play
         try:
             await cmd_howtoplay(update, ctx)
         except Exception as e:
@@ -433,11 +435,10 @@ async def handle_action_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("You are not in a game.")
         return
     mapping = {"kill":"wolf_vote","peek":"seer_peek","aura":"aura_peek","save":"doctor_save","protect":"bodyguard_protect","heal":"witch_heal","poison":"witch_poison","bless":"priest_bless","scry":"sorceress_scry","bite":"vampire_bite","recruit":"cult_recruit"}
-    method = mapping.get(action)
-    if not method:
+    if not hasattr(game, mapping.get(action, "")):
         await q.edit_message_text("Action not supported.")
         return
-    res = getattr(game, method)(user.id, target_id)
+    res = getattr(game, mapping[action])(user.id, target_id)
     try:
         await q.edit_message_text(f"{res}")
     except Exception:
@@ -473,67 +474,134 @@ async def cmd_scry(update: Update, ctx: ContextTypes.DEFAULT_TYPE):   await _sin
 async def cmd_bite(update: Update, ctx: ContextTypes.DEFAULT_TYPE):   await _single_target_cmd(update, ctx, "bite", "vampire_bite")
 async def cmd_recruit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):await _single_target_cmd(update, ctx, "recruit", "cult_recruit")
 
-
-async def cmd_cheatroles(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    chat = update.effective_chat
-    game = None
-    if chat and chat.id in GAMES and GAMES[chat.id].host_id == user.id:
-        game = GAMES[chat.id]
-    else:
-        for g in GAMES.values():
-            if g.host_id == user.id:
-                game = g
-                break
-    if not game:
-        await update.effective_message.reply_text("You are not a host in any active game.")
+async def handle_proceed_day(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    data = q.data or ""
+    try:
+        _, chat_id_str = data.split(":")
+        chat_id = int(chat_id_str)
+    except Exception:
         return
+    game = GAMES.get(chat_id)
+    if not game:
+        await q.edit_message_text("No active game here.")
+        return
+    if q.from_user.id != game.host_id:
+        await q.edit_message_text("Only the host can proceed to day.")
+        return
+    if game.phase != "night":
+        await q.edit_message_text("It is not night.")
+        return
+    cancel_autoday(chat_id)
+    res = game.resolve_night()
+    winner = game.is_over()
+    text = res + (f" {winner}." if winner else "")
+    try:
+        await q.edit_message_text("✅ Proceed ke siang sekarang.")
+    except Exception:
+        pass
+    await ctx.bot.send_message(chat_id=chat_id, text=text)
+    if game.phase != "over":
+        await ctx.bot.send_message(chat_id=chat_id, text="Day phase. Use, /vote <name or number>. Host can /tally and /endday.")
 
-    lines = ["🎭 Cheat Roles Board , Host Only", "Ssshhh jangan bagitau orang lain 👀", ""]
-    if not game.players:
-        lines.append("No players yet.")
-    else:
-        for i, p in enumerate(game.players.values(), start=1):
-            role_name = p.role.name if p.role else "Unassigned"
-            emoji = role_emoji(role_name)
-            lines.append(f"{i}. {p.name} , {emoji} {role_name}")
-    msg = "\\n".join(lines)
+FUN_EXITS = [
+    "🛑 Game end weh, semua balik kampung dulu, next time jangan gaduh sangat.",
+    "💥 Game cancelled, plot twist, semua kena culik UFO.",
+    "🎭 Game stop, nanti kita sambung drama ni lagi.",
+    "😌 Rehat jap, minum teh ais, next round kita all in."
+]
 
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔒 Close", callback_data="close_message")]])
+def _quick_restart_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🎮 Start New Game", callback_data=f"start_newgame:{chat_id}")]])
 
-    if chat and chat.type != Chat.PRIVATE:
-        try:
-            await ctx.bot.send_message(chat_id=user.id, text=msg, reply_markup=kb)
-            await update.effective_message.reply_text("I sent the cheat board to your DM.")
-        except Exception:
-            await update.effective_message.reply_text("I could not DM you, start a private chat with me first, then run /cheatroles again.")
-    else:
-        await update.effective_message.reply_text(msg, reply_markup=kb)
-
+def _build_summary_text(game: Game) -> str:
+    lines = []
+    lines.append("📜 Ringkasan game, players, role, status")
+    for p in game.players.values():
+        role = p.role.name if p.role else "Unassigned"
+        status = "Alive" if p.alive else "Dead"
+        lines.append(f"{p.name}, {role}, {status}")
+    return "\n".join(lines)
 
 async def cmd_exitgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
     if chat is None or chat.id not in GAMES:
-        await update.effective_message.reply_text("❌ No active game here.")
+        await update.effective_message.reply_text("No active game here.")
         return
     game = GAMES[chat.id]
     if user.id != game.host_id:
-        await update.effective_message.reply_text("🚫 Only the host can end the game.")
+        await update.effective_message.reply_text("Only the host can end the game.")
+        return
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Yes, end game", callback_data=f"exit_confirm:{chat.id}:yes")],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"exit_confirm:{chat.id}:no")]
+    ])
+    await update.effective_message.reply_text("⚠ Betul nak end game ini, semua progress akan hilang.", reply_markup=kb)
+
+async def handle_exit_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    data = q.data or ""
+    try:
+        _, chat_id_str, choice = data.split(":")
+        chat_id = int(chat_id_str)
+    except Exception:
+        return
+    game = GAMES.get(chat_id)
+    if not game:
+        try:
+            await q.edit_message_text("No active game to end.")
+        except Exception:
+            pass
+        return
+    if q.from_user.id != game.host_id:
+        await q.edit_message_text("Only the host can end the game.")
+        return
+    if choice != "yes":
+        try:
+            await q.edit_message_text("Cancel, game diteruskan.")
+        except Exception:
+            pass
         return
     try:
-        cancel_autoday(chat.id)
+        cancel_autoday(chat_id)
     except Exception:
         pass
-    lines = ["📜 Game summary", "Players, role, status"]
-    for p in game.players.values():
-        role = p.role.name if p.role else "Unassigned"
-        status = "Alive" if p.alive else "Dead"
-        lines.append(f"{p.name}, {role}, {status}")
-    await update.effective_message.reply_text("\n".join(lines))
-    del GAMES[chat.id]
-    await update.effective_message.reply_text("🛑 Game ended by host, semua reset, run /newgame to start again.")
+    summary = _build_summary_text(game)
+    try:
+        await q.edit_message_text("Ending game now.")
+    except Exception:
+        pass
+    await ctx.bot.send_message(chat_id=chat_id, text=summary)
+    fun = FUN_EXITS[0]
+    try:
+        import random as _r
+        fun = _r.choice(FUN_EXITS)
+    except Exception:
+        pass
+    await ctx.bot.send_message(chat_id=chat_id, text=fun, reply_markup=_quick_restart_keyboard(chat_id))
+    try:
+        del GAMES[chat_id]
+    except KeyError:
+        pass
 
+async def handle_start_newgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    data = q.data or ""
+    try:
+        _, chat_id_str = data.split(":")
+        chat_id = int(chat_id_str)
+    except Exception:
+        return
+    host_id = q.from_user.id
+    GAMES[chat_id] = Game(chat_id=chat_id, host_id=host_id)
+    try:
+        await q.edit_message_text("🎮 New game lobby created, host is you. Players, tekan /join, host boleh /startgame bila ready.")
+    except Exception:
+        await ctx.bot.send_message(chat_id=chat_id, text="🎮 New game lobby created, host is you. Players, tekan /join, host boleh /startgame bila ready.")
 
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -575,7 +643,8 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_proceed_day, pattern=r"^proceed_day:\d+$"))
     app.add_handler(CallbackQueryHandler(handle_exit_confirm, pattern=r"^exit_confirm:\d+:(yes|no)$"))
     app.add_handler(CallbackQueryHandler(handle_start_newgame, pattern=r"^start_newgame:\d+$"))
-    app.add_handler(CallbackQueryHandler(lambda u,c: u.callback_query.message.delete(), pattern=r"^close_message$"))
+    app.add_handler(CallbackQueryHandler(close_message_handler, pattern=r"^close_message$"))
+
     app.add_handler(CommandHandler("kill", cmd_kill))
     app.add_handler(CommandHandler("peek", cmd_peek))
     app.add_handler(CommandHandler("aura", cmd_aura))
