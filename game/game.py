@@ -110,13 +110,13 @@ class Game:
             if r is CULT_LEADER:
                 self.cult.add(p.user_id)
 
-        self.phase = "night"
-        self.day_count = 0
+        self.phase = "day"
+        self.day_count = 1
         self.wolf_votes.clear()
         self.day_votes.clear()
         self.silenced_today.clear()
         self.bound_next_night.clear()
-        return "🌙 Malam bermula, role semua siap sedia."
+        return "🌞 Siang 1 bermula, masa borak dan vote."
 
     def living(self) -> List[Player]:
         return [p for p in self.players.values() if p.alive]
@@ -251,14 +251,14 @@ class Game:
             return "It is not day."
         tally = self.tally()
         if not tally:
-            self.phase = "night"
+            self.phase = "day"
             return "⏳ Tak ada undian, terus sambung malam, fokus DM korang."
 
         max_votes = max(tally.values())
         top = [t for t, v in tally.items() if v == max_votes]
 
         if len(top) > 1 or max_votes == 0:
-            self.phase = "night"
+            self.phase = "day"
             return "🤝 Seri, tak ada yang kena keluar, sambung malam sekarang."
 
         target = top[0]
@@ -266,7 +266,7 @@ class Game:
 
         if victim.role is PRINCE and target not in self.prince_revealed:
             self.prince_revealed.add(target)
-            self.phase = "night"
+            self.phase = "day"
             self.day_votes.clear()
             return f"👑 {victim.name} rupanya Prince, batal undi, sambung malam."
 
@@ -281,7 +281,7 @@ class Game:
         if victim.role is HUNTER:
             hunter_text = f" {victim.name} was the Hunter, the host may allow a final shot."
 
-        self.phase = "night"
+        self.phase = "day"
         self.day_votes.clear()
         winner = self.is_over()
         if winner:
