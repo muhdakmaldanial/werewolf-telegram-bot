@@ -1,8 +1,7 @@
-import os, json, io
-import logging
-from typing import Dict, List
+import os, asyncio, logging
+from typing import Dict
 from telegram import Update, Chat, User, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from game.game import Game
 from game.roles import *
 
@@ -10,14 +9,10 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("werewolf-bot")
 
 GAMES: Dict[int, Game] = {}
-
-# Single preset, all roles every game
 CHAOS_DECK = ALL_ROLES
 
 def mention(u: User) -> str:
-    if u.username:
-        return f"@{u.username}"
-    return u.full_name
+    return f"@{u.username}" if u.username else u.full_name
 
 def numbered_alive_list(game: Game) -> str:
     alive = sorted([p for p in game.players.values() if p.alive], key=lambda x: x.name.lower())
@@ -26,18 +21,14 @@ def numbered_alive_list(game: Game) -> str:
     return "\n".join(f"{i+1}. {p.name}" for i, p in enumerate(alive))
 
 def group_keyboard(is_host: bool) -> ReplyKeyboardMarkup:
-    rows = [
-        [KeyboardButton("/join"), KeyboardButton("/status"), KeyboardButton("/listalive")],
-    ]
+    rows = [[KeyboardButton("/join"), KeyboardButton("/status"), KeyboardButton("/listalive")]]
     if is_host:
         rows.append([KeyboardButton("/startgame"), KeyboardButton("/tally"), KeyboardButton("/endday")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, selective=True)
 
 def targets_keyboard(game: Game, action: str) -> InlineKeyboardMarkup:
     alive = sorted([p for p in game.players.values() if p.alive], key=lambda x: x.name.lower())
-    buttons = []
-    for i, p in enumerate(alive, start=1):
-        buttons.append([InlineKeyboardButton(f"{i}. {p.name}", callback_data=f"{action}:{p.user_id}")])
+    buttons = [[InlineKeyboardButton(f"{i+1}. {p.name}", callback_data=f"{action}:{p.user_id}")] for i, p in enumerate(alive)]
     return InlineKeyboardMarkup(buttons)
 
 def build_modboard_text(game: Game) -> str:
@@ -53,15 +44,23 @@ async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("Pong, bot is online.")
 
 async def cmd_howtoplay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "Chaos Deck, all roles included\n"
-        "Group, /newgame, /join, /startgame, /listalive, /status, /vote, /tally, /endday, /mayor, /modboard\n"
-        "Night in DM, Wolves, /kill, Seer, /peek, Aura Seer, /aura, Doctor, /save, Bodyguard, /protect, Witch, /heal or /poison, "
-        "Old Hag, /silence, Spellcaster, /bind a b, Cupid, /pair a b, Priest, /bless, Sorceress, /scry, Vamp, /bite, "
-        "Paranormal Investigator, /check a [b], Troublemaker, /swap a b, Cult Leader, /recruit\n"
-        "Buttons, group shows quick actions, DM shows target buttons if you run a command without a target"
-    )
-    await update.effective_message.reply_text(text)
+    parts = [
+        "How to play, Chaos Deck, all roles included\n1, Host, /newgame in group\n2, Everyone, tap /join\n3, Host, tap /startgame\n4, Bot DMs your role, keep it secret",
+        "Day phase\nDiscuss in group, use /status, use /listalive to see living players",
+        "Night phase\nRoles get DM buttons, Kill, Peek, Aura, Save, Protect, Heal, Poison, Bless, Scry, Bite, Recruit",
+        "Group commands\n/join, join lobby\n/status, show players\n/listalive, list living\n/startgame, host only\n/tally, show votes\n/endday, advance to night\n/modboard, host only",
+        "DM commands, shows target buttons if no name is typed\n/kill, wolves\n/peek, seer\n/aura, aura seer\n/save, doctor\n/protect, bodyguard\n/heal, witch\n/poison, witch\n/bless, priest\n/scry, sorceress\n/bite, vampire\n/recruit, cult leader",
+        "Tips\nCheck your DM at night\nUse buttons for targets\nNumbers work, try /listalive then pick a number",
+    ]
+    sent0 = await update.effective_message.reply_text(parts[0])
+    try:
+        await sent0.pin()
+    except Exception as e:
+        log.info("Pin failed, %s", e)
+    await asyncio.sleep(0.5)
+    for txt in parts[1:]:
+        await update.effective_chat.send_message(txt)
+        await asyncio.sleep(0.4)
 
 async def cmd_modboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -93,15 +92,8 @@ async def cmd_modboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
-    game = None
-    if chat and chat.id in GAMES:
-        game = GAMES[chat.id]
-    else:
-        for g in GAMES.values():
-            if user.id in g.players:
-                game = g
-                break
-    if game is None:
+    game = GAMES.get(chat.id) if chat and chat.id in GAMES else next((g for g in GAMES.values() if user.id in g.players), None)
+    if not game:
         await update.effective_message.reply_text("No active game here.")
         return
     phase = game.phase
@@ -137,16 +129,8 @@ async def cmd_join(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_listalive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
-    game = None
-    if chat and chat.id in GAMES:
-        game = GAMES[chat.id]
-    else:
-        user = update.effective_user
-        for g in GAMES.values():
-            if user.id in g.players:
-                game = g
-                break
-    if game is None:
+    game = GAMES.get(chat.id) if chat and chat.id in GAMES else None
+    if not game:
         await update.effective_message.reply_text("No active game here.")
         return
     await update.effective_message.reply_text("Alive\n" + numbered_alive_list(game))
@@ -224,22 +208,8 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 if p.role is MASON and mason_names:
                     text += " Your fellow Masons, " + ", ".join(n for n in mason_names if n != p.name)
                 await ctx.bot.send_message(chat_id=pid, text=text)
-                # quick target buttons
                 if p.role in (WEREWOLF, WOLF_CUB, LONE_WOLF, SEER, AURA_SEER, DOCTOR, BODYGUARD, WITCH, PRIEST, SORCERESS, VAMPIRE, CULT_LEADER):
-                    action_map = {
-                        SEER: "peek",
-                        AURA_SEER: "aura",
-                        DOCTOR: "save",
-                        BODYGUARD: "protect",
-                        WITCH: "heal",
-                        PRIEST: "bless",
-                        SORCERESS: "scry",
-                        VAMPIRE: "bite",
-                        CULT_LEADER: "recruit",
-                        WEREWOLF: "kill",
-                        WOLF_CUB: "kill",
-                        LONE_WOLF: "kill",
-                    }
+                    action_map = {SEER:"peek", AURA_SEER:"aura", DOCTOR:"save", BODYGUARD:"protect", WITCH:"heal", PRIEST:"bless", SORCERESS:"scry", VAMPIRE:"bite", CULT_LEADER:"recruit", WEREWOLF:"kill", WOLF_CUB:"kill", LONE_WOLF:"kill"}
                     await ctx.bot.send_message(chat_id=pid, text="Quick targets", reply_markup=targets_keyboard(game, action_map[p.role]))
             except Exception as e:
                 log.warning("Failed to DM player %s, %s", p.name, e)
@@ -308,7 +278,6 @@ async def cmd_endday(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if game.phase == "night":
         await update.effective_message.reply_text("Night phase. Night roles, act in DM.")
 
-# Button callback
 async def handle_action_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -335,7 +304,6 @@ async def handle_action_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await ctx.bot.send_message(chat_id=user.id, text=res)
 
-# Private commands, button fallback
 async def _single_target_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE, action: str, method_name: str, alive_only=True):
     user = update.effective_user
     if update.effective_chat is None or update.effective_chat.type != Chat.PRIVATE:
@@ -366,9 +334,6 @@ async def cmd_scry(update: Update, ctx: ContextTypes.DEFAULT_TYPE):   await _sin
 async def cmd_bite(update: Update, ctx: ContextTypes.DEFAULT_TYPE):   await _single_target_cmd(update, ctx, "bite", "vampire_bite")
 async def cmd_recruit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):await _single_target_cmd(update, ctx, "recruit", "cult_recruit")
 
-async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await cmd_howtoplay(update, ctx)
-
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     secret = os.getenv("WEBHOOK_SECRET", "dev-secret")
@@ -386,9 +351,7 @@ def main():
 
     app = ApplicationBuilder().token(token).build()
 
-    # group
     app.add_handler(CommandHandler("ping", cmd_ping))
-    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("howtoplay", cmd_howtoplay))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("newgame", cmd_newgame))
@@ -403,7 +366,6 @@ def main():
     app.add_handler(CommandHandler("endday", cmd_endday))
     app.add_handler(CommandHandler("modboard", cmd_modboard))
 
-    # private
     app.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^(kill|peek|aura|save|protect|heal|poison|bless|scry|bite|recruit):\d+$"))
     app.add_handler(CommandHandler("kill", cmd_kill))
     app.add_handler(CommandHandler("peek", cmd_peek))
@@ -416,9 +378,7 @@ def main():
     app.add_handler(CommandHandler("scry", cmd_scry))
     app.add_handler(CommandHandler("bite", cmd_bite))
     app.add_handler(CommandHandler("recruit", cmd_recruit))
-    app.add_handler(CommandHandler("modboard", cmd_modboard))
 
-    # run webhook
     app.run_webhook(listen="0.0.0.0", port=port, url_path=webhook_path, webhook_url=webhook_url, secret_token=secret)
 
 if __name__ == "__main__":
