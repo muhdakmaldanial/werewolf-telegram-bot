@@ -95,7 +95,7 @@ class Game:
         self.witch_poison_available = True
         self.lovers = None
         self.hoodlum_marks = None
-        self.trouble_swap = None
+               self.trouble_swap = None
         self.wolves_skip_kill_tonight = False
         self.cult_target = None
 
@@ -191,7 +191,6 @@ class Game:
             return sub[0].user_id
         return None
 
-    # Night actions subset, representative, enough for buttons feature
     def wolf_vote(self, voter_id: int, target_id: int) -> str:
         if self.phase != "night":
             return "It is not night."
@@ -351,13 +350,11 @@ class Game:
         return f"Old Hag will silence {self.name_of(target_id)} tomorrow."
 
     def resolve_night(self) -> str:
-        # Bind and silence
         if self.old_hag_target and self.players.get(self.old_hag_target, Player(0,"")).alive:
             self.silenced_today = {self.old_hag_target}
         else:
             self.silenced_today = set()
 
-        # Tally wolf kill
         kills: List[int] = []
         if not self.wolves_skip_kill_tonight and self.wolf_votes:
             tally: Dict[int, int] = {}
@@ -378,13 +375,11 @@ class Game:
         if self.priest_target:
             protected.add(self.priest_target)
 
-        # Witch heal
         if self.witch_heal_target is not None and self.witch_heal_available:
             kills = [k for k in kills if k != self.witch_heal_target]
             protected.add(self.witch_heal_target)
             self.witch_heal_available = False
 
-        # Cult conversion
         cult_converted: Optional[int] = None
         if self.cult_target is not None:
             t = self.players.get(self.cult_target)
@@ -395,7 +390,6 @@ class Game:
                     self.cult.add(t.user_id)
                     cult_converted = t.user_id
 
-        # Vampire action, simplified, convert some village roles, else kill
         vamp_converted: Optional[int] = None
         if self.vampire_target is not None:
             t = self.players.get(self.vampire_target)
@@ -409,7 +403,9 @@ class Game:
                         vamp_converted = t.user_id
                     else:
                         t.alive = False
-                        kills.append(t.user_id)
+                        died = t.user_id
+                        if died not in kills:
+                            kills.append(died)
 
         died_tonight: List[int] = []
         diseased_killed = False
@@ -452,7 +448,6 @@ class Game:
                 self.players[a].alive = False
                 died_tonight.append(a)
 
-        # reset night state
         self.wolf_votes.clear()
         self.seer_target = None
         self.aura_target = None
@@ -485,7 +480,6 @@ class Game:
         parts.append("Day begins.")
         return " ".join(parts)
 
-    # Day voting
     def vote(self, voter_id: int, target_id: int) -> str:
         if self.phase != "day":
             return "It is not day."
