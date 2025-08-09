@@ -75,8 +75,8 @@ class Game:
     def assign_roles(self, roleset: Optional[List[Role]] = None) -> str:
         if self.phase != "lobby":
             return "Game already started."
-        if len(self.players) < 8:
-            return "Need at least 8 players."
+        if len(self.players) < 5:
+            return "Need at least 5 players."
         roles = list(roleset or [VILLAGER]*len(self.players))
         if len(roles) < len(self.players):
             roles += [VILLAGER] * (len(self.players) - len(roles))
