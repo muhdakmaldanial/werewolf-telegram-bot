@@ -77,7 +77,7 @@ class Game:
             return "Game already started."
         if len(self.players) < 5:
             return "Need at least 5 players."
-        roles = list(roleset or [VILLAGER]*len(self.players))
+roles = list(roleset or [VILLAGER]*len(self.players))
         if len(roles) < len(self.players):
             roles += [VILLAGER] * (len(self.players) - len(roles))
         elif len(roles) > len(self.players):
