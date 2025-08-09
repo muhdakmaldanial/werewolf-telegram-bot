@@ -11,6 +11,59 @@ log = logging.getLogger("werewolf-bot")
 GAMES: Dict[int, Game] = {}
 CHAOS_DECK = ALL_ROLES
 
+def nextphase_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("➡ Next Phase", callback_data=f"nextphase:{chat_id}")]])
+
+async def handle_nextphase_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    chat_id = None
+    try:
+        _, cid = (q.data or "").split(":")
+        chat_id = int(cid)
+    except Exception:
+        return
+    game = GAMES.get(chat_id)
+    if not game:
+        try:
+            await q.edit_message_text("No active game here.")
+        except Exception:
+            pass
+        return
+    if q.from_user.id != game.host_id:
+        try:
+            await q.edit_message_text("Only the host can change the phase.")
+        except Exception:
+            pass
+        return
+    # If night, resolve and announce day, if day, end day to night
+    if game.phase == "night":
+        res = game.resolve_night()
+        winner = game.is_over()
+        text = res + (f" {winner}." if winner else "")
+        try:
+            await q.edit_message_text("Proceeding to day.")
+        except Exception:
+            pass
+        await ctx.bot.send_message(chat_id=chat_id, text=text)
+        if game.phase != "over":
+            await ctx.bot.send_message(chat_id=chat_id, text="Day phase. Vote dengan butang atau guna /vote <nombor>.")
+    elif game.phase == "day":
+        res = game.end_day()
+        try:
+            await q.edit_message_text("Proceeding to night.")
+        except Exception:
+            pass
+        await ctx.bot.send_message(chat_id=chat_id, text=res)
+        if game.phase != "over" and game.phase == "night":
+            await ctx.bot.send_message(chat_id=chat_id, text="Night phase. Role malam, buat aksi dalam DM.")
+    else:
+        try:
+            await q.edit_message_text("Game belum bermula atau sudah tamat.")
+        except Exception:
+            pass
+
+
 ROLE_EMOJI = {
     "Seer": "🔮",
     "Apprentice Seer": "🧑‍🔮",
@@ -224,6 +277,7 @@ async def cmd_votes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     done, total = game.votes_progress()
     await update.effective_message.reply_text(f"🗳 Progres undi, {done} dari {total} siap. Guna /tally untuk kiraan.")
 
+
 async def cmd_pending(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
@@ -231,16 +285,24 @@ async def cmd_pending(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("No active game here.")
         return
     game = GAMES[chat.id]
+    is_host = (user.id == game.host_id)
+    items = game.pending_summary() if hasattr(game, "pending_summary") else ["No pending info."]
+    txt = "⏳ Pending" + "".join(items)
+    if is_host:
+        try:
+            await update.effective_message.reply_text(txt, reply_markup=nextphase_keyboard(chat.id))
+        except Exception:
+            await update.effective_message.reply_text(txt)
+    else:
+        await update.effective_message.reply_text(txt)
+    return
+
+    game = GAMES[chat.id]
     if user.id != game.host_id:
         await update.effective_message.reply_text("Only the host can view pending actions.")
         return
     items = game.pending_summary()
-    txt = "⏳ Pending\n" + "\n".join(items)
-    if items == ["All required night actions are in"] and game.phase == "night":
-        await update.effective_message.reply_text(txt + "\n⚡ Semua action masuk, auto proceed ke siang dalam 45 saat ⏳", reply_markup=proceed_button(chat.id))
-        await schedule_autoday(chat.id, ctx, delay_secs=45)
-    else:
-        await update.effective_message.reply_text(txt)
+    await update.effective_message.reply_text("⏳ Pending" + "".join(items))
 
 async def cmd_newgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -315,7 +377,35 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     roleset = CHAOS_DECK
     res = game.assign_roles(roleset)
     await update.effective_message.reply_text(res)
-    if game.phase == "night":
+    if game.phase == "day":
+        await update.effective_message.reply_text("🌞 Siang 1 bermula, masa borak, tuduh, dan undi. Guna /vote <nama atau nombor>, tengok senarai dengan /listalive.")
+        # Post vote buttons for quick voting
+        try:
+            await update.effective_chat.send_message("🗳 Vote sekarang, pilih nama bawah", reply_markup=targets_keyboard(game, "vote"))
+        except Exception as e:
+            log.info("Vote keyboard failed, %s", e)
+
+        # DM teammates info once on Day 1
+        try:
+            for pid, p in game.players.items():
+                packs = teammates_for(pid, game)
+                if packs:
+                    lines = ["🤝 Teammates"]
+                    for label, names in packs.items():
+                        filtered = [n for n in names if n != p.name]
+                        if not filtered:
+                            continue
+                        lines.append(f"{label}, " + ", ".join(filtered))
+                    if len(lines) > 1:
+                        await ctx.bot.send_message(chat_id=pid, text="\n".join(lines))
+        except Exception as e:
+            log.info("Teammate DM failed, %s", e)
+        try:
+            await cmd_howtoplay(update, ctx)
+        except Exception as e:
+            log.info("Auto howtoplay failed, %s", e)
+    
+    elif game.phase == "night":
         await update.effective_message.reply_text(f"Starting game with Chaos Deck. Players, {len(game.players)}. Assigning roles from the full deck.")
         mason_names = [game.players[m].name for m in game.masons]
         for pid, p in game.players.items():
@@ -347,7 +437,7 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     text += " You can recruit one target, /recruit <target>."
                 if p.role is MASON and mason_names:
                     text += " Your fellow Masons, " + ", ".join(n for n in mason_names if n != p.name)
-                await ctx.bot.send_message(chat_id=pid, text=text)
+                await ctx.bot.send_message(chat_id=pid, text=text + "\n\n📩 Tip, guna butang ini dalam DM, bukan dalam group.")
                 if p.role in (WEREWOLF, WOLF_CUB, LONE_WOLF, SEER, AURA_SEER, DOCTOR, BODYGUARD, WITCH, PRIEST, SORCERESS, VAMPIRE, CULT_LEADER):
                     action_map = {SEER:"peek", AURA_SEER:"aura", DOCTOR:"save", BODYGUARD:"protect", WITCH:"heal", PRIEST:"bless", SORCERESS:"scry", VAMPIRE:"bite", CULT_LEADER:"recruit", WEREWOLF:"kill", WOLF_CUB:"kill", LONE_WOLF:"kill"}
                     await ctx.bot.send_message(chat_id=pid, text="Quick targets", reply_markup=targets_keyboard(game, action_map[p.role]))
@@ -375,6 +465,10 @@ async def cmd_day(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if game.phase == "over":
         return
     await update.effective_message.reply_text("Day phase. Use, /vote <name or number>. Host can /tally and /endday.")
+    try:
+        await update.effective_chat.send_message("🗳 Vote sekarang, pilih nama bawah", reply_markup=targets_keyboard(game, "vote"))
+    except Exception as e:
+        log.info("Vote keyboard failed, %s", e)
 
 async def cmd_vote(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -421,8 +515,37 @@ async def cmd_endday(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(res)
     if game.phase == "over":
         return
-    if game.phase == "night":
+    if game.phase == "day":
+        await update.effective_message.reply_text("🌞 Siang 1 bermula, masa borak, tuduh, dan undi. Guna /vote <nama atau nombor>, tengok senarai dengan /listalive.")
+        # Post vote buttons for quick voting
+        try:
+            await update.effective_chat.send_message("🗳 Vote sekarang, pilih nama bawah", reply_markup=targets_keyboard(game, "vote"))
+        except Exception as e:
+            log.info("Vote keyboard failed, %s", e)
+
+        # DM teammates info once on Day 1
+        try:
+            for pid, p in game.players.items():
+                packs = teammates_for(pid, game)
+                if packs:
+                    lines = ["🤝 Teammates"]
+                    for label, names in packs.items():
+                        filtered = [n for n in names if n != p.name]
+                        if not filtered:
+                            continue
+                        lines.append(f"{label}, " + ", ".join(filtered))
+                    if len(lines) > 1:
+                        await ctx.bot.send_message(chat_id=pid, text="\n".join(lines))
+        except Exception as e:
+            log.info("Teammate DM failed, %s", e)
+        try:
+            await cmd_howtoplay(update, ctx)
+        except Exception as e:
+            log.info("Auto howtoplay failed, %s", e)
+    
+    elif game.phase == "night":
         await update.effective_message.reply_text("Night phase. Night roles, act in DM.")
+
 
 async def handle_action_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -432,14 +555,71 @@ async def handle_action_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         action, target_str = data.split(":")
         target_id = int(target_str)
     except Exception:
-        await q.edit_message_text("Bad button data.")
+        try:
+            await q.edit_message_text("Button data error, try again in DM.")
+        except Exception:
+            pass
         return
+
+    user = q.from_user
+    game = next((g for g in GAMES.values() if user.id in g.players), None)
+    if game is None:
+        try:
+            await q.edit_message_text("No active game for you. Use buttons in DM only.")
+        except Exception:
+            pass
+        return
+
+    mapping = {"kill":"wolf_vote","peek":"seer_peek","aura":"aura_peek","save":"doctor_save","protect":"bodyguard_protect","heal":"witch_heal","poison":"witch_poison","bless":"priest_bless","scry":"sorceress_scry","bite":"vampire_bite","recruit":"cult_recruit","vote":"vote"}
+    cmd_from_action = {
+        "kill": "/kill",
+        "peek": "/peek",
+        "aura": "/aura",
+        "save": "/save",
+        "protect": "/protect",
+        "heal": "/heal",
+        "poison": "/poison",
+        "bless": "/bless",
+        "scry": "/scry",
+        "bite": "/bite",
+        "recruit": "/recruit",
+    }
+
+    method_name = mapping.get(action)
+    if not method_name or not hasattr(game, method_name):
+        # Fallback, show a copyable command and re-send target buttons
+        cmd = cmd_from_action.get(action, "/help")
+        try:
+            await q.edit_message_text(f"Action not supported here. DM only. Copy and send, {cmd} {target_id}", reply_markup=targets_keyboard(game, action))
+        except Exception:
+            await ctx.bot.send_message(chat_id=user.id, text=f"Action not supported here. DM only. Copy and send, {cmd} {target_id}", reply_markup=targets_keyboard(game, action))
+        return
+
+    # Call the game method
+    try:
+        res = getattr(game, method_name)(user.id, target_id)
+    except Exception as e:
+        # Fallback to manual command if method raised
+        cmd = cmd_from_action.get(action, "/help")
+        try:
+            await q.edit_message_text(f"Action error, try command, {cmd} {target_id}")
+        except Exception:
+            await ctx.bot.send_message(chat_id=user.id, text=f"Action error, try command, {cmd} {target_id}")
+        return
+
+    # Show result
+    try:
+        await q.edit_message_text(f"{res}")
+    except Exception:
+        await ctx.bot.send_message(chat_id=user.id, text=res)
+    return
+
     user = q.from_user
     game = next((g for g in GAMES.values() if user.id in g.players), None)
     if game is None:
         await q.edit_message_text("You are not in a game.")
         return
-    mapping = {"kill":"wolf_vote","peek":"seer_peek","aura":"aura_peek","save":"doctor_save","protect":"bodyguard_protect","heal":"witch_heal","poison":"witch_poison","bless":"priest_bless","scry":"sorceress_scry","bite":"vampire_bite","recruit":"cult_recruit"}
+    mapping = {"kill":"wolf_vote","peek":"seer_peek","aura":"aura_peek","save":"doctor_save","protect":"bodyguard_protect","heal":"witch_heal","poison":"witch_poison","bless":"priest_bless","scry":"sorceress_scry","bite":"vampire_bite","recruit":"cult_recruit","vote":"vote"}
     if not hasattr(game, mapping.get(action, "")):
         await q.edit_message_text("Action not supported.")
         return
@@ -608,6 +788,119 @@ async def handle_start_newgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await ctx.bot.send_message(chat_id=chat_id, text="🎮 New game lobby created, host is you. Players, tekan /join, host boleh /startgame bila ready.")
 
+async def cmd_votebuttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if chat is None or chat.id not in GAMES:
+        await update.effective_message.reply_text("No active game here.")
+        return
+    game = GAMES[chat.id]
+    if game.phase != "day":
+        await update.effective_message.reply_text("It is not day right now.")
+        return
+    try:
+        await update.effective_chat.send_message("🗳 Vote sekarang, pilih nama bawah", reply_markup=targets_keyboard(game, "vote"))
+    except Exception as e:
+        log.info("Vote keyboard failed, %s", e)
+
+
+def teammates_for(user_id: int, game: Game) -> Dict[str, list]:
+    packs = {}
+    if user_id in game.wolves:
+        packs["🐺 Wolves"] = [game.players[pid].name for pid in game.wolves if pid in game.players]
+    if user_id in game.masons:
+        packs["🧱 Masons"] = [game.players[pid].name for pid in game.masons if pid in game.players]
+    if user_id in game.vampires:
+        packs["🦇 Vampires"] = [game.players[pid].name for pid in game.vampires if pid in game.players]
+    if user_id in game.cult:
+        packs["🔮 Cult"] = [game.players[pid].name for pid in game.cult if pid in game.players]
+    return packs
+
+async def cmd_pack(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    # Find the game the user is in
+    game = next((g for g in GAMES.values() if user.id in g.players), None)
+    if game is None:
+        await update.effective_message.reply_text("No active game for you.")
+        return
+    packs = teammates_for(user.id, game)
+    if not packs:
+        await update.effective_message.reply_text("You have no known teammates.")
+        return
+    lines = ["🤝 Your known teammates"]
+    for label, names in packs.items():
+        you = game.players[user.id].name if user.id in game.players else "You"
+        # Do not duplicate the user's own name in the list
+        filtered = [n for n in names if n != you]
+        if not filtered:
+            filtered = ["No others"]
+        lines.append(f"{label}, " + ", ".join(filtered))
+    await update.effective_message.reply_text("\n".join(lines))
+
+
+async def cmd_role(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    # DM only, show your role and a one line tip
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat is None or chat.type != Chat.PRIVATE:
+        return
+    game = next((g for g in GAMES.values() if user.id in g.players), None)
+    if not game:
+        await update.effective_message.reply_text("You are not in any active game.")
+        return
+    p = game.players.get(user.id)
+    if not p or not p.role:
+        await update.effective_message.reply_text("No role assigned yet.")
+        return
+    role = p.role.name
+    emoji = role_emoji(role)
+    tips = {
+        "Werewolf": "Bunuh seorang setiap malam. Guna butang Kill dalam DM.",
+        "Wolf Cub": "Ikut geng serigala, undi mangsa setiap malam.",
+        "Lone wolf": "Solo wolf, survive sampai akhir.",
+        "Seer": "Intai alignment orang tiap malam, guna Peek.",
+        "Aura Seer": "Baca aura, Wolf, Neutral, atau Village.",
+        "Apprentice Seer": "Back up Seer, bila Seer mati kau ambil alih.",
+        "Doctor": "Rawat seorang, sekali malam, guna Save.",
+        "Bodyguard": "Protect seorang, jangan dua malam berturut pada orang sama.",
+        "Witch": "Ada Heal dan Poison, sekali setiap satu sepanjang game.",
+        "Vampire": "Bite orang untuk recruit, tengok syarat dalam DM.",
+        "Cult Leader": "Recruit orang jadi cult masa malam.",
+        "Mason": "Kau ada geng Mason, percaya sesama sendiri.",
+        "Villager": "Siang banyak cakap, undi bijak, malam tidur."
+    }
+    tip = tips.get(role, "Main ikut instinct, baca chat, buat keputusan bijak.")
+    await update.effective_message.reply_text(f"{emoji} Role kau, {role}. {tip}")
+
+
+
+async def cmd_nextphase(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat is None or chat.id not in GAMES:
+        await update.effective_message.reply_text("No active game here.")
+        return
+    game = GAMES[chat.id]
+    if user.id != game.host_id:
+        await update.effective_message.reply_text("Only the host can change the phase.")
+        return
+
+    if game.phase == "night":
+        # Resolve night to day
+        res = game.resolve_night()
+        winner = game.is_over()
+        await update.effective_message.reply_text(res + (f" {winner}." if winner else ""))
+        if game.phase != "over":
+            await update.effective_message.reply_text("🌞 Siang bermula, masa borak, tuduh, dan undi. Guna /vote <nama atau nombor>, atau /votebuttons untuk butang undi.")
+    elif game.phase == "day":
+        # End day to night
+        res = game.end_day()
+        await update.effective_message.reply_text(res)
+        if game.phase != "over" and game.phase == "night":
+            await update.effective_message.reply_text("🌙 Night bermula, role yang ada aksi, sila buat dalam DM.")
+    else:
+        await update.effective_message.reply_text(f"Phase sekarang, {game.phase}.")
+
+
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     secret = os.getenv("WEBHOOK_SECRET", "dev-secret")
@@ -639,12 +932,18 @@ def main():
     app.add_handler(CommandHandler("day", cmd_day))
     app.add_handler(CommandHandler("vote", cmd_vote))
     app.add_handler(CommandHandler("tally", cmd_tally))
+    app.add_handler(CommandHandler("votebuttons", cmd_votebuttons))
     app.add_handler(CommandHandler("endday", cmd_endday))
+    app.add_handler(CallbackQueryHandler(handle_nextphase_button, pattern=r"^nextphase:\d+$"))
+    app.add_handler(CommandHandler("nextphase", cmd_nextphase))
     app.add_handler(CommandHandler("modboard", cmd_modboard))
+    app.add_handler(CommandHandler("role", cmd_role))
+    app.add_handler(CommandHandler("pack", cmd_pack))
     app.add_handler(CommandHandler("cheatroles", cmd_cheatroles))
     app.add_handler(CommandHandler("exitgame", cmd_exitgame))
 
     app.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^(kill|peek|aura|save|protect|heal|poison|bless|scry|bite|recruit):\d+$"))
+    app.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^vote:\d+$"))
     app.add_handler(CallbackQueryHandler(handle_proceed_day, pattern=r"^proceed_day:\d+$"))
     app.add_handler(CallbackQueryHandler(handle_exit_confirm, pattern=r"^exit_confirm:\d+:(yes|no)$"))
     app.add_handler(CallbackQueryHandler(handle_start_newgame, pattern=r"^start_newgame:\d+$"))
