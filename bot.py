@@ -400,71 +400,71 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     res = game.assign_roles(roleset)
     await update.effective_message.reply_text(res)
     
-if game.phase == "day":
-        await update.effective_message.reply_text("🌞 Siang 1 bermula, masa borak, tuduh, dan undi.")
-        await update.effective_message.reply_text(send_vote_keyboard_text(game), reply_markup=vote_keyboard(game))
-        # DM teammates info once on Day 1
-        try:
-            for pid, p in game.players.items():
-                packs = teammates_for(pid, game)
-                if packs:
-                    lines = ["🤝 Teammates"]
-                    for label, names in packs.items():
-                        filtered = [n for n in names if n != p.name]
-                        if not filtered:
-                            continue
-                        lines.append(f"{label}, " + ", ".join(filtered))
-                    if len(lines) > 1:
-                        await ctx.bot.send_message(chat_id=pid, text="\n".join(lines))
-        except Exception as e:
-            log.info("Teammate DM failed, %s", e)
-        try:
-            await cmd_howtoplay(update, ctx)
-        except Exception as e:
-            log.info("Auto howtoplay failed, %s", e)
-elif game.phase == "night":
-        await update.effective_message.reply_text(f"Starting game with Chaos Deck. Players, {len(game.players)}. Assigning roles from the full deck.")
-        mason_names = [game.players[m].name for m in game.masons]
-        for pid, p in game.players.items():
+    if game.phase == "day":
+            await update.effective_message.reply_text("🌞 Siang 1 bermula, masa borak, tuduh, dan undi.")
+            await update.effective_message.reply_text(send_vote_keyboard_text(game), reply_markup=vote_keyboard(game))
+            # DM teammates info once on Day 1
             try:
-                text = f"Your role is {p.role.name}. You are {'Alive' if p.alive else 'Dead'}."
-                if p.role in (WEREWOLF, WOLF_CUB, LONE_WOLF):
-                    pack = [game.players[w].name for w in game.wolves]
-                    text += " Wolf team, " + ", ".join(pack)
-                    text += " Use, /kill <name or number> at night."
-                if p.role is SEER:
-                    text += " Use, /peek <name or number>."
-                if p.role is AURA_SEER:
-                    text += " Use, /aura <name or number>."
-                if p.role is DOCTOR:
-                    text += " Use, /save <name or number>."
-                if p.role is BODYGUARD:
-                    text += " Use, /protect <name or number>. You cannot protect the same target twice."
-                if p.role is WITCH:
-                    text += " You have two potions, heal once and poison once. /heal, /poison."
-                if p.role is OLD_HAG:
-                    text += " You can silence one player, /silence <target>."
-                if p.role is SORCERESS:
-                    text += " You can scry a Seer type, /scry <target>."
-                if p.role is PRIEST:
-                    text += " You can bless one player, /bless <target>."
-                if p.role is VAMPIRE:
-                    text += " You can bite one target, /bite <target>."
-                if p.role is CULT_LEADER:
-                    text += " You can recruit one target, /recruit <target>."
-                if p.role is MASON and mason_names:
-                    text += " Your fellow Masons, " + ", ".join(n for n in mason_names if n != p.name)
-                await ctx.bot.send_message(chat_id=pid, text=text + "\n\n📩 Tip, guna butang ini dalam DM, bukan dalam group.")
-                if p.role in (WEREWOLF, WOLF_CUB, LONE_WOLF, SEER, AURA_SEER, DOCTOR, BODYGUARD, WITCH, PRIEST, SORCERESS, VAMPIRE, CULT_LEADER):
-                    action_map = {SEER:"peek", AURA_SEER:"aura", DOCTOR:"save", BODYGUARD:"protect", WITCH:"heal", PRIEST:"bless", SORCERESS:"scry", VAMPIRE:"bite", CULT_LEADER:"recruit", WEREWOLF:"kill", WOLF_CUB:"kill", LONE_WOLF:"kill"}
-                    await ctx.bot.send_message(chat_id=pid, text="Quick targets", reply_markup=targets_keyboard(game, action_map[p.role]))
+                for pid, p in game.players.items():
+                    packs = teammates_for(pid, game)
+                    if packs:
+                        lines = ["🤝 Teammates"]
+                        for label, names in packs.items():
+                            filtered = [n for n in names if n != p.name]
+                            if not filtered:
+                                continue
+                            lines.append(f"{label}, " + ", ".join(filtered))
+                        if len(lines) > 1:
+                            await ctx.bot.send_message(chat_id=pid, text="\n".join(lines))
             except Exception as e:
-                log.warning("Failed to DM player %s, %s", p.name, e)
-        await update.effective_message.reply_text("🌙 Malam bermula, check DM untuk aksi. Aku akan pin cara main untuk semua.")
-        try:
-            await cmd_howtoplay(update, ctx)
-        except Exception as e:
-            log.info("Auto howtoplay failed, %s", e)
+                log.info("Teammate DM failed, %s", e)
+            try:
+                await cmd_howtoplay(update, ctx)
+            except Exception as e:
+                log.info("Auto howtoplay failed, %s", e)
+    elif game.phase == "night":
+            await update.effective_message.reply_text(f"Starting game with Chaos Deck. Players, {len(game.players)}. Assigning roles from the full deck.")
+            mason_names = [game.players[m].name for m in game.masons]
+            for pid, p in game.players.items():
+                try:
+                    text = f"Your role is {p.role.name}. You are {'Alive' if p.alive else 'Dead'}."
+                    if p.role in (WEREWOLF, WOLF_CUB, LONE_WOLF):
+                        pack = [game.players[w].name for w in game.wolves]
+                        text += " Wolf team, " + ", ".join(pack)
+                        text += " Use, /kill <name or number> at night."
+                    if p.role is SEER:
+                        text += " Use, /peek <name or number>."
+                    if p.role is AURA_SEER:
+                        text += " Use, /aura <name or number>."
+                    if p.role is DOCTOR:
+                        text += " Use, /save <name or number>."
+                    if p.role is BODYGUARD:
+                        text += " Use, /protect <name or number>. You cannot protect the same target twice."
+                    if p.role is WITCH:
+                        text += " You have two potions, heal once and poison once. /heal, /poison."
+                    if p.role is OLD_HAG:
+                        text += " You can silence one player, /silence <target>."
+                    if p.role is SORCERESS:
+                        text += " You can scry a Seer type, /scry <target>."
+                    if p.role is PRIEST:
+                        text += " You can bless one player, /bless <target>."
+                    if p.role is VAMPIRE:
+                        text += " You can bite one target, /bite <target>."
+                    if p.role is CULT_LEADER:
+                        text += " You can recruit one target, /recruit <target>."
+                    if p.role is MASON and mason_names:
+                        text += " Your fellow Masons, " + ", ".join(n for n in mason_names if n != p.name)
+                    await ctx.bot.send_message(chat_id=pid, text=text + "\n\n📩 Tip, guna butang ini dalam DM, bukan dalam group.")
+                    if p.role in (WEREWOLF, WOLF_CUB, LONE_WOLF, SEER, AURA_SEER, DOCTOR, BODYGUARD, WITCH, PRIEST, SORCERESS, VAMPIRE, CULT_LEADER):
+                        action_map = {SEER:"peek", AURA_SEER:"aura", DOCTOR:"save", BODYGUARD:"protect", WITCH:"heal", PRIEST:"bless", SORCERESS:"scry", VAMPIRE:"bite", CULT_LEADER:"recruit", WEREWOLF:"kill", WOLF_CUB:"kill", LONE_WOLF:"kill"}
+                        await ctx.bot.send_message(chat_id=pid, text="Quick targets", reply_markup=targets_keyboard(game, action_map[p.role]))
+                except Exception as e:
+                    log.warning("Failed to DM player %s, %s", p.name, e)
+            await update.effective_message.reply_text("🌙 Malam bermula, check DM untuk aksi. Aku akan pin cara main untuk semua.")
+            try:
+                await cmd_howtoplay(update, ctx)
+            except Exception as e:
+                log.info("Auto howtoplay failed, %s", e)
 
 async def cmd_day(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
