@@ -224,12 +224,14 @@ class Game:
             return "It is not day."
         if voter_id not in self.players or not self.players[voter_id].alive:
             return "Only living players can vote."
-        if target_id not in self.players or not self.players[target_id].alive:
-            return "Invalid target."
         if voter_id in self.silenced_today:
             return "You are silenced and cannot vote today."
+        # target_id == -1 means skip lynch
+        if target_id != -1:
+            if target_id not in self.players or not self.players[target_id].alive:
+                return "Invalid target."
         self.day_votes[voter_id] = target_id
-        return f"Vote recorded on {self.name_of(target_id)}."
+        return "Vote recorded on Skip" if target_id == -1 else f"Vote recorded on {self.name_of(target_id)}."
 
     def votes_progress(self) -> Tuple[int, int]:
         eligible = [p.user_id for p in self.players.values() if p.alive and p.user_id not in self.silenced_today]
@@ -251,37 +253,31 @@ class Game:
             return "It is not day."
         tally = self.tally()
         if not tally:
-            self.phase = "day"
-            return "⏳ Tak ada undian, terus sambung malam, fokus DM korang."
-
+            self.phase = "night"
+            self.day_votes.clear()
+            return "⏳ No votes cast, moving to Night."
         max_votes = max(tally.values())
         top = [t for t, v in tally.items() if v == max_votes]
-
-        if len(top) > 1 or max_votes == 0:
-            self.phase = "day"
-            return "🤝 Seri, tak ada yang kena keluar, sambung malam sekarang."
-
+        if -1 in top or len(top) > 1 or max_votes == 0:
+            self.phase = "night"
+            self.day_votes.clear()
+            return "🤝 Day ends, no one is lynched. Night begins."
         target = top[0]
         victim = self.players[target]
-
         if victim.role is PRINCE and target not in self.prince_revealed:
             self.prince_revealed.add(target)
-            self.phase = "day"
+            self.phase = "night"
             self.day_votes.clear()
             return f"👑 {victim.name} rupanya Prince, batal undi, sambung malam."
-
         if victim.role is TANNER:
             self.phase = "over"
             return f"🟠 {victim.name} kena undi keluar, Tanner menang, GG."
-
         victim.alive = False
         self.wolf_cub_lynched_yesterday = (victim.role is WOLF_CUB)
-
         hunter_text = ""
         if victim.role is HUNTER:
             hunter_text = f" {victim.name} was the Hunter, the host may allow a final shot."
-
-        self.phase = "day"
+        self.phase = "night"
         self.day_votes.clear()
         winner = self.is_over()
         if winner:
