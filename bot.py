@@ -11,6 +11,67 @@ log = logging.getLogger("werewolf-bot")
 GAMES: Dict[int, Game] = {}
 CHAOS_DECK = ALL_ROLES
 
+AUTO_TASKS: Dict[int, asyncio.Task] = {}
+
+def cancel_autoday(chat_id: int):
+    t = AUTO_TASKS.get(chat_id)
+    if t and not t.cancelled():
+        t.cancel()
+    AUTO_TASKS.pop(chat_id, None)
+
+async def schedule_autoday(chat_id: int, ctx: ContextTypes.DEFAULT_TYPE, delay_secs: int = 45):
+    cancel_autoday(chat_id)
+    async def _go():
+        try:
+            await asyncio.sleep(delay_secs)
+            game = GAMES.get(chat_id)
+            if not game or game.phase != "night":
+                return
+            res = game.resolve_night()
+            winner = game.is_over()
+            text = res + (f" {winner}." if winner else "")
+            await ctx.bot.send_message(chat_id=chat_id, text=text)
+            if game.phase != "over":
+                await ctx.bot.send_message(chat_id=chat_id, text="Day phase. Use, /vote <name or number>. Host can /tally and /endday.")
+        except asyncio.CancelledError:
+            return
+    AUTO_TASKS[chat_id] = asyncio.create_task(_go())
+
+def proceed_button(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("Proceed to Day", callback_data=f"proceed_day:{chat_id}")]])
+
+async def handle_proceed_day(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    data = q.data or ""
+    try:
+        _, chat_id_str = data.split(":")
+        chat_id = int(chat_id_str)
+    except Exception:
+        return
+    game = GAMES.get(chat_id)
+    if not game:
+        await q.edit_message_text("No active game here.")
+        return
+    if q.from_user.id != game.host_id:
+        await q.edit_message_text("Only the host can proceed to day.")
+        return
+    if game.phase != "night":
+        await q.edit_message_text("It is not night.")
+        return
+    cancel_autoday(chat_id)
+    res = game.resolve_night()
+    winner = game.is_over()
+    text = res + (f" {winner}." if winner else "")
+    try:
+        await q.edit_message_text("Proceeding to day now.")
+    except Exception:
+        pass
+    await ctx.bot.send_message(chat_id=chat_id, text=text)
+    if game.phase != "over":
+        await ctx.bot.send_message(chat_id=chat_id, text="Day phase. Use, /vote <name or number>. Host can /tally and /endday.")
+
+
 def mention(u: User) -> str:
     return f"@{u.username}" if u.username else u.full_name
 
@@ -43,14 +104,15 @@ def build_modboard_text(game: Game) -> str:
 async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("Pong, bot is online.")
 
+# Gen Z bilingual how to play, split and pinned
 async def cmd_howtoplay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parts = [
-        "How to play, Chaos Deck, all roles included\n1, Host, /newgame in group\n2, Everyone, tap /join\n3, Host, tap /startgame\n4, Bot DMs your role, keep it secret",
-        "Day phase\nDiscuss in group, use /status, use /listalive to see living players",
-        "Night phase\nRoles get DM buttons, Kill, Peek, Aura, Save, Protect, Heal, Poison, Bless, Scry, Bite, Recruit",
-        "Group commands\n/join, join lobby\n/status, show players\n/listalive, list living\n/startgame, host only\n/tally, show votes\n/endday, advance to night\n/modboard, host only",
-        "DM commands, shows target buttons if no name is typed\n/kill, wolves\n/peek, seer\n/aura, aura seer\n/save, doctor\n/protect, bodyguard\n/heal, witch\n/poison, witch\n/bless, priest\n/scry, sorceress\n/bite, vampire\n/recruit, cult leader",
-        "Tips\nCheck your DM at night\nUse buttons for targets\nNumbers work, try /listalive then pick a number",
+        "Selamat datang ke Werewolf Chaos Deck, semua role masuk sekali. Mission, survive, tipu orang, conquer kampung. Have fun and do not leak your role.",
+        "Player count, nak game yang lit, kena cukup player. Min, 8. Recommended, 12 to 20. Max, 24 untuk fun, 30 ke atas kalau kau memang nak chaos.",
+        "Game flow, Day, sembang, tuduh, vote. Night, role special jalan kerja dalam DM, bunuh, protect, intip, recruit. Ulang sampai ada pemenang.",
+        "Main di group, guna button bawah chat. /join untuk masuk, /status untuk tengok pemain, /listalive untuk tengok yang hidup, host guna /startgame, /tally, /endday, /modboard.",
+        "DM actions, kalau kau ada role, taip command atau biar bot bagi butang sasaran. /kill, /peek, /aura, /save, /protect, /heal, /poison, /bless, /scry, /bite, /recruit.",
+        "Tips, check DM waktu malam, gunakan nombor dari /listalive untuk sasaran cepat, act natural kalau jahat, trust no one, trust the bot."
     ]
     sent0 = await update.effective_message.reply_text(parts[0])
     try:
@@ -99,11 +161,40 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     phase = game.phase
     day = game.day_count
     last = game.name_of(game.last_killed) if game.last_killed else "None"
-    alive = ", ".join(sorted([p.name for p in game.players.values() if p.alive], key=str.lower)) or "None"
+    alive_names = [p.name for p in game.players.values() if p.alive]
     await update.effective_message.reply_text(
-        f"Status, phase, {phase}, day, {day}, last killed, {last}. Alive, {alive}.",
-        reply_markup=group_keyboard(is_host=(game.host_id == user.id))
+        f"Status, phase, {phase}, day, {day}, last killed, {last}. Alive count, {len(alive_names)}."
     )
+
+async def cmd_votes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if chat is None or chat.id not in GAMES:
+        await update.effective_message.reply_text("No active game here.")
+        return
+    game = GAMES[chat.id]
+    if game.phase != "day":
+        await update.effective_message.reply_text("It is not day.")
+        return
+    done, total = game.votes_progress()
+    await update.effective_message.reply_text(f"Votes, {done} of {total} submitted. Use /tally to view counts.")
+
+async def cmd_pending(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat is None or chat.id not in GAMES:
+        await update.effective_message.reply_text("No active game here.")
+        return
+    game = GAMES[chat.id]
+    if user.id != game.host_id:
+        await update.effective_message.reply_text("Only the host can view pending actions.")
+        return
+    items = game.pending_summary()
+    txt = "Pending\n" + "\n".join(items)
+    if items == ["All required night actions are in"] and game.phase == "night":
+        await update.effective_message.reply_text(txt + "\nAuto, will proceed to day in 45 seconds.", reply_markup=proceed_button(chat.id))
+        await schedule_autoday(chat.id, ctx, delay_secs=45)
+    else:
+        await update.effective_message.reply_text(txt)
 
 async def cmd_newgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -224,6 +315,7 @@ async def cmd_day(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if game.phase != "night":
         await update.effective_message.reply_text("It is not night.")
         return
+    cancel_autoday(chat.id)
     res = game.resolve_night()
     winner = game.is_over()
     await update.effective_message.reply_text(res + (f" {winner}." if winner else ""))
@@ -271,6 +363,7 @@ async def cmd_endday(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("No active game here.")
         return
     game = GAMES[chat.id]
+    cancel_autoday(chat.id)
     res = game.end_day()
     await update.effective_message.reply_text(res)
     if game.phase == "over":
@@ -354,6 +447,8 @@ def main():
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("howtoplay", cmd_howtoplay))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("votes", cmd_votes))
+    app.add_handler(CommandHandler("pending", cmd_pending))
     app.add_handler(CommandHandler("newgame", cmd_newgame))
     app.add_handler(CommandHandler("join", cmd_join))
     app.add_handler(CommandHandler("listalive", cmd_listalive))
@@ -367,6 +462,7 @@ def main():
     app.add_handler(CommandHandler("modboard", cmd_modboard))
 
     app.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^(kill|peek|aura|save|protect|heal|poison|bless|scry|bite|recruit):\d+$"))
+    app.add_handler(CallbackQueryHandler(handle_proceed_day, pattern=r"^proceed_day:\d+$"))
     app.add_handler(CommandHandler("kill", cmd_kill))
     app.add_handler(CommandHandler("peek", cmd_peek))
     app.add_handler(CommandHandler("aura", cmd_aura))
