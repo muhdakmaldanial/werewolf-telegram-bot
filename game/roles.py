@@ -12,13 +12,10 @@ class Role:
     alignment: Alignment
     night_action: bool = False
 
-# Core
 VILLAGER = Role("Villager", Alignment.VILLAGE, night_action=False)
 WEREWOLF = Role("Werewolf", Alignment.WOLF, night_action=True)
 SEER = Role("Seer", Alignment.VILLAGE, night_action=True)
 DOCTOR = Role("Doctor", Alignment.VILLAGE, night_action=True)
-
-# Big set
 WITCH = Role("Witch", Alignment.VILLAGE, night_action=True)
 CUPID = Role("Cupid", Alignment.VILLAGE, night_action=True)
 TOUGH_GUY = Role("Tough Guy", Alignment.VILLAGE, night_action=False)
@@ -32,7 +29,6 @@ OLD_HAG = Role("Old Hag", Alignment.VILLAGE, night_action=True)
 SPELLCASTER = Role("Spellcaster", Alignment.VILLAGE, night_action=True)
 PACIFIST = Role("Pacifist", Alignment.VILLAGE, night_action=False)
 GHOST = Role("Ghost", Alignment.VILLAGE, night_action=False)
-
 APPRENTICE_SEER = Role("Apprentice Seer", Alignment.VILLAGE, night_action=False)
 AURA_SEER = Role("Aura Seer", Alignment.VILLAGE, night_action=True)
 LYCAN = Role("Lycan", Alignment.VILLAGE, night_action=False)
@@ -48,7 +44,6 @@ VAMPIRE = Role("Vampire", Alignment.NEUTRAL, night_action=True)
 VILLAGE_IDIOT = Role("Village Idiot", Alignment.VILLAGE, night_action=False)
 TANNER = Role("Tanner", Alignment.NEUTRAL, night_action=False)
 LONE_WOLF = Role("Lone wolf", Alignment.WOLF, night_action=True)
-
 CULT_LEADER = Role("Cult Leader", Alignment.NEUTRAL, night_action=True)
 
 ALL_ROLES = [
