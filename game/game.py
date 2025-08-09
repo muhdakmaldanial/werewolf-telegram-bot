@@ -78,11 +78,11 @@ class Game:
         if len(self.players) < 5:
             return "Need at least 5 players."
         roles = list(roleset or [VILLAGER]*len(self.players))
-                if len(roles) < len(self.players):
-                    roles += [VILLAGER] * (len(self.players) - len(roles))
-                elif len(roles) > len(self.players):
-                    roles = roles[:len(self.players)]
-                random.shuffle(roles)
+        if len(roles) < len(self.players):
+            roles += [VILLAGER] * (len(self.players) - len(roles))
+        elif len(roles) > len(self.players):
+            roles = roles[:len(self.players)]
+        random.shuffle(roles)
 
         self.wolves.clear()
         self.vampires.clear()
