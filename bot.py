@@ -53,6 +53,15 @@ def numbered_alive_list(game: Game) -> str:
         return "No living players."
     return "\n".join(f"{i+1}. {p.name}" for i, p in enumerate(alive))
 
+def build_modboard_text(game: Game) -> str:
+    lines = []
+    for p in game.players.values():
+        role_name = p.role.name if p.role else "Unassigned"
+        status = "Alive" if p.alive else "Dead"
+        cult_tag = ", Cult" if p.user_id in game.cult else ""
+        lines.append(f"{p.name}, {role_name}{cult_tag}, {status}")
+    return "Moderator board\n" + "\n".join(lines)
+
 async def post_summary(update: Update, game: Game, header: str):
     alive = [p.name for p in game.players.values() if p.alive]
     silenced = ", ".join(game.name_of(x) for x in game.silenced_today) if game.silenced_today else "None"
@@ -115,6 +124,40 @@ async def cmd_showroles(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     roles = CHAT_PRESET.get(chat.id) or DEFAULT_ROLESET
     names = [r.name for r in roles]
     await update.effective_message.reply_text("Current roles\n" + ", ".join(names))
+
+async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.effective_message.reply_text("Pong, bot is online.")
+
+async def cmd_modboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat = update.effective_chat
+
+    # find the game this user is hosting
+    game = None
+    if chat and chat.id in GAMES and user.id == GAMES[chat.id].host_id:
+        game = GAMES[chat.id]
+    else:
+        for g in GAMES.values():
+            if g.host_id == user.id:
+                game = g
+                break
+
+    if game is None:
+        await update.effective_message.reply_text("You are not a host in any active game.")
+        return
+    if user.id != game.host_id:
+        await update.effective_message.reply_text("Only the host can view the moderator board.")
+        return
+
+    text = build_modboard_text(game)
+    if chat and chat.type != Chat.PRIVATE:
+        try:
+            await ctx.bot.send_message(chat_id=user.id, text=text)
+            await update.effective_message.reply_text("I sent the moderator board to your DM.")
+        except Exception:
+            await update.effective_message.reply_text("I could not DM you, start a private chat with me first, then run /modboard again.")
+    else:
+        await update.effective_message.reply_text(text)
 
 async def cmd_addrole(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -553,6 +596,10 @@ def main():
     app.add_handler(CommandHandler("bite", lambda u,c: passthrough_private(u,c,"vampire_bite", need_two=False)))
     app.add_handler(CommandHandler("swap", lambda u,c: passthrough_private(u,c,"troublemaker_swap", need_two=True)))
     app.add_handler(CommandHandler("recruit", lambda u,c: passthrough_private(u,c,"cult_recruit", need_two=False)))
+    
+    app.add_handler(CommandHandler("ping", cmd_ping))
+    app.add_handler(CommandHandler("modboard", cmd_modboard))
+
 
     app.run_webhook(listen="0.0.0.0", port=port, url_path=webhook_path, webhook_url=webhook_url, secret_token=secret)
 
