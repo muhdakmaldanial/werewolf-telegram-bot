@@ -95,7 +95,7 @@ class Game:
         self.witch_poison_available = True
         self.lovers = None
         self.hoodlum_marks = None
-               self.trouble_swap = None
+        self.trouble_swap = None
         self.wolves_skip_kill_tonight = False
         self.cult_target = None
 
