@@ -298,6 +298,9 @@ async def cmd_mayor(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(f"{p.name} reveals as Mayor. Their vote counts double.")
 
 async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if len(game.players) < 5:
+    await update.effective_message.reply_text("⚠️ Kena ada minimum 6 orang baru boleh start game. Jom ajak kawan lagi!")
+    return
     chat = update.effective_chat
     user = update.effective_user
     if chat is None or chat.id not in GAMES:
