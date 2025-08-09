@@ -511,6 +511,30 @@ async def cmd_cheatroles(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(msg, reply_markup=kb)
 
 
+async def cmd_exitgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat is None or chat.id not in GAMES:
+        await update.effective_message.reply_text("❌ No active game here.")
+        return
+    game = GAMES[chat.id]
+    if user.id != game.host_id:
+        await update.effective_message.reply_text("🚫 Only the host can end the game.")
+        return
+    try:
+        cancel_autoday(chat.id)
+    except Exception:
+        pass
+    lines = ["📜 Game summary", "Players, role, status"]
+    for p in game.players.values():
+        role = p.role.name if p.role else "Unassigned"
+        status = "Alive" if p.alive else "Dead"
+        lines.append(f"{p.name}, {role}, {status}")
+    await update.effective_message.reply_text("\n".join(lines))
+    del GAMES[chat.id]
+    await update.effective_message.reply_text("🛑 Game ended by host, semua reset, run /newgame to start again.")
+
+
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     secret = os.getenv("WEBHOOK_SECRET", "dev-secret")
