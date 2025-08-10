@@ -327,6 +327,12 @@ async def cmd_newgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reply_markup=group_keyboard(is_host=True)
     )
 
+    # Auto howtoplay with pin
+    try:
+        await cmd_howtoplay(update, ctx)
+    except Exception:
+        pass
+
 async def cmd_join(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
@@ -399,13 +405,6 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     roleset = CHAOS_DECK
     res = game.assign_roles(roleset)
     await update.effective_message.reply_text(res)
-    
-
-    # Pin howtoplay once per chat
-    try:
-        await cmd_howtoplay(update, ctx)
-    except Exception as e:
-        pass
     # Announce Day 1
     await update.effective_message.reply_text("🌞 Siang 1 bermula, masa borak dan undi. Gunakan butang undi di bawah atau /votebuttons.")
     try:
@@ -472,7 +471,7 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         await ctx.bot.send_message(chat_id=pid, text="Quick targets", reply_markup=targets_keyboard(game, action_map[p.role]))
                 except Exception as e:
                     log.warning("Failed to DM player %s, %s", p.name, e)
-            await update.effective_message.reply_text("🌙 Malam bermula, check DM untuk aksi. Aku akan pin cara main untuk semua.")
+            await update.effective_message.reply_text("🌞 Siang 1 bermula, check DM untuk aksi. Aku akan pin cara main untuk semua.")
             try:
                 await cmd_howtoplay(update, ctx)
             except Exception as e:
