@@ -253,20 +253,20 @@ class Game:
             return "It is not day."
         tally = self.tally()
         if not tally:
-            self.phase = "night"
+            self.phase = "day"
             self.day_votes.clear()
             return "⏳ No votes cast, moving to Night."
         max_votes = max(tally.values())
         top = [t for t, v in tally.items() if v == max_votes]
         if -1 in top or len(top) > 1 or max_votes == 0:
-            self.phase = "night"
+            self.phase = "day"
             self.day_votes.clear()
             return "🤝 Day ends, no one is lynched. Night begins."
         target = top[0]
         victim = self.players[target]
         if victim.role is PRINCE and target not in self.prince_revealed:
             self.prince_revealed.add(target)
-            self.phase = "night"
+            self.phase = "day"
             self.day_votes.clear()
             return f"👑 {victim.name} rupanya Prince, batal undi, sambung malam."
         if victim.role is TANNER:
@@ -277,7 +277,7 @@ class Game:
         hunter_text = ""
         if victim.role is HUNTER:
             hunter_text = f" {victim.name} was the Hunter, the host may allow a final shot."
-        self.phase = "night"
+        self.phase = "day"
         self.day_votes.clear()
         winner = self.is_over()
         if winner:
