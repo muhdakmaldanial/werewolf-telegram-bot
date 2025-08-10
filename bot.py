@@ -1,7 +1,7 @@
 import os, asyncio, logging
 from typing import Dict
 from telegram import Update, Chat, User, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import MessageHandler, filters, ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from game.game import Game
 from game.roles import *
 
@@ -10,6 +10,200 @@ log = logging.getLogger("werewolf-bot")
 
 GAMES: Dict[int, Game] = {}
 CHAOS_DECK = ALL_ROLES
+
+
+# ==== Guards and helpers for pinning, roles, and votes ====
+HOWTO_PINNED_CHATS = set()
+PENDING_DM = {}  # chat_id -> set(user_ids) who have not opened DM
+VOTE_MSG_IDS = {}  # chat_id -> message_id
+BOT_USERNAME_CACHE = None
+
+async def get_bot_username(ctx):
+    global BOT_USERNAME_CACHE
+    if BOT_USERNAME_CACHE:
+        return BOT_USERNAME_CACHE
+    try:
+        me = await ctx.bot.get_me()
+        BOT_USERNAME_CACHE = me.username
+        return BOT_USERNAME_CACHE
+    except Exception:
+        return None
+
+async def pin_howto_once(update, ctx):
+    chat = update.effective_chat
+    if not chat:
+        return
+    if chat.id in HOWTO_PINNED_CHATS:
+        return
+    # call howtoplay and pin the returned message if possible
+    try:
+        msg = await cmd_howtoplay(update, ctx)
+        if hasattr(msg, "message_id"):
+            try:
+                await ctx.bot.pin_chat_message(chat_id=chat.id, message_id=msg.message_id)
+            except Exception:
+                pass
+    except Exception:
+        # ignore, do not break game flow
+        pass
+    HOWTO_PINNED_CHATS.add(chat.id)
+
+async def build_open_dm_text_and_keyboard(chat_id: int, ctx):
+    username = await get_bot_username(ctx)
+    if not username:
+        return "Buka DM bot dan tekan Start untuk terima role.", None
+    deep = f"https://t.me/{username}?start=role_{chat_id}"
+    from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔒 Open DM to get your role", url=deep)]])
+    return "Belum buka DM dengan bot, tekan butang ini untuk terima role anda.", kb
+
+async def send_roles_for_chat(chat_id: int, ctx):
+    # send DM roles to all players in this chat game
+    game = GAMES.get(chat_id)
+    if not game:
+        return
+    pending = set()
+    mason_names = [game.players[m].name for m in getattr(game, "masons", [])] if getattr(game, "masons", None) else []
+    for pid, p in game.players.items():
+        try:
+            text = f"Role kau, {p.role.name}."
+            role_tip = {
+                "Werewolf":"Bunuh seorang setiap malam, guna Kill dalam DM",
+                "Wolf Cub":"Bunuh seorang setiap malam, guna Kill",
+                "Lone wolf":"Bunuh seorang setiap malam, guna Kill",
+                "Seer":"Intai seorang setiap malam, guna Peek",
+                "Aura Seer":"Intai aura, guna Aura",
+                "Bodyguard":"Lindung seorang, guna Protect, tidak boleh target sama 2 malam berturut-turut",
+                "Doctor":"Selamatkan seorang, guna Save",
+                "Witch":"Ada Heal sekali dan Poison sekali",
+                "Priest":"Bless seorang, guna Bless",
+                "Sorceress":"Scry seorang, cari Seer",
+                "Vampire":"Gigit seorang, recruit team",
+                "Cult Leader":"Recruit seorang masuk cult",
+            }.get(p.role.name, "Fokus siang, undi bijak, hidupkan kampung")
+            text += f" {role_tip}."
+            # teammates
+            if p.role.name in ["Werewolf","Wolf Cub","Lone wolf"]:
+                pack = [game.players[w].name for w in getattr(game, "wolves", []) if w != pid]
+                if pack:
+                    text += " Wolf team, " + ", ".join(pack) + "."
+            if p.role.name == "Mason" and mason_names:
+                buddies = [n for n in mason_names if n != p.name]
+                if buddies:
+                    text += " Fellow Masons, " + ", ".join(buddies) + "."
+            text += "\\n\\n📩 Guna butang di DM, bukan di group."
+            await ctx.bot.send_message(chat_id=pid, text=text)
+            # quick targets
+            action_map = {
+                "Seer":"peek","Aura Seer":"aura","Doctor":"save","Bodyguard":"protect",
+                "Witch":"heal","Priest":"bless","Sorceress":"scry","Vampire":"bite",
+                "Cult Leader":"recruit","Werewolf":"kill","Wolf Cub":"kill","Lone wolf":"kill"
+            }
+            if p.role.name in action_map:
+                await ctx.bot.send_message(chat_id=pid, text="Quick targets", reply_markup=targets_keyboard(game, action_map[p.role.name]))
+        except Exception as e:
+            # most likely Forbidden, user never started the bot
+            pending.add(pid)
+    if pending:
+        PENDING_DM[chat_id] = pending
+        txt, kb = await build_open_dm_text_and_keyboard(chat_id, ctx)
+        try:
+            await ctx.bot.send_message(chat_id=chat_id, text=txt, reply_markup=kb)
+        except Exception:
+            pass
+
+async def handle_start_deeplink(update, ctx):
+    # Handles /start role_<chatid> from deep link, then sends that user's role
+    msg = update.effective_message
+    text = msg.text or ""
+    if not text.startswith("/start"):
+        return
+    parts = text.split(maxsplit=1)
+    payload = parts[1] if len(parts) > 1 else ""
+    if not payload.startswith("role_"):
+        return
+    try:
+        chat_id = int(payload.split("_",1)[1])
+    except Exception:
+        return
+    game = GAMES.get(chat_id)
+    if not game:
+        await msg.reply_text("Tiada game aktif untuk chat ini.")
+        return
+    # send role now if exists
+    p = game.players.get(update.effective_user.id)
+    if not p:
+        await msg.reply_text("Anda bukan pemain dalam game ini.")
+        return
+    try:
+        await ctx.bot.send_message(chat_id=update.effective_user.id, text=f"Role kau, {p.role.name}.")
+        # optional targets
+        action_map = {"Seer":"peek","Aura Seer":"aura","Doctor":"save","Bodyguard":"protect","Witch":"heal","Priest":"bless","Sorceress":"scry","Vampire":"bite","Cult Leader":"recruit","Werewolf":"kill","Wolf Cub":"kill","Lone wolf":"kill"}
+        if p.role.name in action_map:
+            await ctx.bot.send_message(chat_id=update.effective_user.id, text="Quick targets", reply_markup=targets_keyboard(game, action_map[p.role.name]))
+        # remove from pending
+        s = PENDING_DM.get(chat_id, set())
+        if update.effective_user.id in s:
+            s.discard(update.effective_user.id)
+            PENDING_DM[chat_id] = s
+    except Exception:
+        pass
+
+async def post_vote_keyboard(chat_id: int, ctx):
+    # edit existing vote message if present, else post a new one
+    game = GAMES.get(chat_id)
+    if not game:
+        return
+    from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+    rows = []
+    alive = [p for p in game.players.values() if p.alive]
+    # build buttons two per row
+    row = []
+    for i, p in enumerate(alive, start=1):
+        row.append(InlineKeyboardButton(f"{i}, {p.name}", callback_data=f"vote:{p.user_id}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    # Day 1 include skip
+    if getattr(game, "day_count", 1) == 1:
+        rows.append([InlineKeyboardButton("↘ Skip lynch", callback_data="vote:0")])
+    kb = InlineKeyboardMarkup(rows) if rows else None
+    # post or edit
+    msg_id = VOTE_MSG_IDS.get(chat_id)
+    text = "🗳 Vote sekarang, tekan nama di bawah."
+    try:
+        if msg_id:
+            await ctx.bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=text, reply_markup=kb)
+        else:
+            m = await ctx.bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
+            VOTE_MSG_IDS[chat_id] = m.message_id
+    except Exception:
+        # fallback to sending fresh
+        try:
+            m = await ctx.bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
+            VOTE_MSG_IDS[chat_id] = m.message_id
+        except Exception:
+            pass
+
+async def cmd_resendroles(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    if not chat or chat.id not in GAMES:
+        await update.effective_message.reply_text("Tiada game aktif di sini.")
+        return
+    game = GAMES[chat.id]
+    if user.id != game.host_id:
+        await update.effective_message.reply_text("Host sahaja boleh guna arahan ini.")
+        return
+    await send_roles_for_chat(chat.id, ctx)
+    pending = PENDING_DM.get(chat.id, set())
+    if pending:
+        await update.effective_message.reply_text(f"Masih belum buka DM, {len(pending)} pemain.")
+    else:
+        await update.effective_message.reply_text("Semua role telah dihantar di DM.")
+
 
 def nextphase_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("➡ Next Phase", callback_data=f"nextphase:{chat_id}")]])
@@ -320,7 +514,8 @@ async def cmd_newgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if chat is None or chat.type == Chat.PRIVATE:
         await update.effective_message.reply_text("Use /newgame in a group chat.")
-        return
+    await pin_howto_once(update, ctx)
+    return
     GAMES[chat.id] = Game(chat_id=chat.id, host_id=user.id)
     await update.effective_message.reply_text(
         "New Werewolf lobby created. Preset, Chaos Deck, all roles included. Players use /join. Host uses /startgame when ready.",
@@ -945,6 +1140,16 @@ async def cmd_nextphase(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if user.id != game.host_id:
         await update.effective_message.reply_text("Only the host can change the phase.")
         return
+    # Debounce
+    if getattr(game,'started', False):
+        await update.effective_message.reply_text('Game sudah bermula.')
+        return
+    game.started = True
+    # send roles via DM now
+    await send_roles_for_chat(chat.id, ctx)
+    # Start Day 1 announcement and vote keyboard
+    await update.effective_message.reply_text('🌞 Siang 1 bermula, masa borak dan undi. Guna butang undi di bawah.')
+    await post_vote_keyboard(chat.id, ctx)
 
     if game.phase == "night":
         # Resolve night to day
@@ -982,6 +1187,7 @@ def main():
 
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("howtoplay", cmd_howtoplay))
+    app.add_handler(CommandHandler("resendroles", cmd_resendroles))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("votes", cmd_votes))
     app.add_handler(CommandHandler("pending", cmd_pending))
@@ -1003,6 +1209,7 @@ def main():
     app.add_handler(CommandHandler("pack", cmd_pack))
     app.add_handler(CommandHandler("cheatroles", cmd_cheatroles))
     app.add_handler(CommandHandler("exitgame", cmd_exitgame))
+    app.add_handler(MessageHandler(filters.Regex(r"^/start role_\d+$"), handle_start_deeplink))
 
     app.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^(kill|peek|aura|save|protect|heal|poison|bless|scry|bite|recruit):\d+$"))
     app.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^vote:\d+$"))
