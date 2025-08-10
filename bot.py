@@ -9,7 +9,6 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("werewolf-bot")
 
 GAMES: Dict[int, Game] = {}
-HOWTO_PINNED_CHATS = set()
 CHAOS_DECK = ALL_ROLES
 
 def nextphase_keyboard(chat_id: int) -> InlineKeyboardMarkup:
@@ -178,9 +177,6 @@ async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("Pong, bot is online.")
 
 async def cmd_howtoplay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat and update.effective_chat.id in HOWTO_PINNED_CHATS:
-        await update.effective_message.reply_text('How to play already pinned for this chat.')
-        return
     parts = [
         "🐺 Selamat datang ke Werewolf Chaos Deck, semua role sekali, mission, survive, tipu orang, conquer kampung, have fun, jangan bocor role.",
         "📊 Player count, nak game lit, kena cukup player, min 8, best 12 hingga 20, max 24 untuk fun, 30 ke atas kalau kau memang nak chaos.",
@@ -192,10 +188,8 @@ async def cmd_howtoplay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     sent0 = await update.effective_message.reply_text(parts[0])
     try:
         await sent0.pin()
-        HOWTO_PINNED_CHATS.add(update.effective_chat.id)
     except Exception as e:
         log.info("Pin failed, %s", e)
-        HOWTO_PINNED_CHATS.add(update.effective_chat.id)
     await asyncio.sleep(0.5)
     for txt in parts[1:]:
         await update.effective_chat.send_message(txt)
@@ -319,7 +313,7 @@ async def cmd_pending(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("Only the host can view pending actions.")
         return
     items = game.pending_summary()
-    await update.effective_message.reply_text("⏳ Pending" + " ".join(items))
+    await update.effective_message.reply_text("⏳ Pending" + "".join(items))
 
 async def cmd_newgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -406,6 +400,18 @@ async def cmd_startgame(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     res = game.assign_roles(roleset)
     await update.effective_message.reply_text(res)
     
+
+    # Pin howtoplay once per chat
+    try:
+        await cmd_howtoplay(update, ctx)
+    except Exception as e:
+        pass
+    # Announce Day 1
+    await update.effective_message.reply_text("🌞 Siang 1 bermula, masa borak dan undi. Gunakan butang undi di bawah atau /votebuttons.")
+    try:
+        await cmd_votebuttons(update, ctx)
+    except Exception:
+        pass
     if game.phase == "day":
             await update.effective_message.reply_text("🌞 Siang 1 bermula, masa borak, tuduh, dan undi.")
             await update.effective_message.reply_text(send_vote_keyboard_text(game), reply_markup=vote_keyboard(game))
@@ -513,19 +519,6 @@ async def cmd_vote(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     res = game.vote(user.id, target_id)
     await update.effective_message.reply_text(res)
-    try:
-        done, total = game.votes_progress()
-        if done >= total and total > 0:
-            try:
-                await update.effective_chat.send_message("⚠️ Semua pemain dah undi. Host, tekan ➡ Next Phase untuk tamatkan siang.")
-            except Exception:
-                pass
-            try:
-                await ctx.bot.send_message(chat_id=game.host_id, text="✅ Semua undi dah masuk. Tekan /nextphase untuk tamatkan siang.")
-            except Exception:
-                pass
-    except Exception:
-        pass
 
 async def cmd_tally(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -1012,7 +1005,7 @@ def main():
     app.add_handler(CommandHandler("cheatroles", cmd_cheatroles))
     app.add_handler(CommandHandler("exitgame", cmd_exitgame))
 
-    app.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^(kill|peek|aura|save|protect|heal|poison|bless|scry|bite|recruit|vote):\d+$"))
+    app.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^(kill|peek|aura|save|protect|heal|poison|bless|scry|bite|recruit):\d+$"))
     app.add_handler(CallbackQueryHandler(handle_action_button, pattern=r"^vote:\d+$"))
     app.add_handler(CallbackQueryHandler(handle_proceed_day, pattern=r"^proceed_day:\d+$"))
     app.add_handler(CallbackQueryHandler(handle_exit_confirm, pattern=r"^exit_confirm:\d+:(yes|no)$"))
