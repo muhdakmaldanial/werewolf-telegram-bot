@@ -367,6 +367,23 @@ def build_modboard_text(game: Game) -> str:
         lines.append(f"{i}. {p.name} , {emoji} {role_name}{cult_tag} , {status}")
     return "\n".join(lines)
 
+# Add somewhere near your other command handlers
+def cmd_claimhost(update, context):
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    game = games.get(chat_id)
+
+    if not game:
+        update.message.reply_text("No game lobby found.")
+        return
+
+    if user_id not in game.players:
+        update.message.reply_text("You must join the lobby first to claim host.")
+        return
+
+    game.host_id = user_id
+    update.message.reply_text(f"You are now the host, {update.effective_user.first_name}!")
+
 async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("Pong, bot is online.")
 
@@ -1268,6 +1285,9 @@ def main():
     app.add_handler(CommandHandler("scry", cmd_scry))
     app.add_handler(CommandHandler("bite", cmd_bite))
     app.add_handler(CommandHandler("recruit", cmd_recruit))
+
+    # In main() where you add handlers
+    app.add_handler(CommandHandler("claimhost", cmd_claimhost))
 
     app.run_webhook(listen="0.0.0.0", port=port, url_path=webhook_path, webhook_url=webhook_url, secret_token=secret)
 
