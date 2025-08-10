@@ -10,7 +10,11 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("werewolf-bot")
 
 MIN_PLAYERS = int(os.getenv("MIN_PLAYERS", "5"))
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+BOT_TOKEN = ( os.getenv("BOT_TOKEN", "")          # standard
+    or os.getenv("TELEGRAM_BOT_TOKEN")            # some repos use this
+    or os.getenv("TELEGRAM_TOKEN")                # some repos use this
+    or os.getenv("TOKEN")                         # fallback generic
+            )
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 PORT = int(os.getenv("PORT", "10000"))
 
@@ -318,8 +322,21 @@ def build_app():
     return app
 
 def main():
+    # Optional local file fallback, do not commit your token
     if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN not set")
+        try:
+            # create local_config.py with a line, TELEGRAM_TOKEN = "123:ABC..."
+            from local_config import TELEGRAM_TOKEN as _LOCAL_TOKEN
+            BOT_TOKEN = _LOCAL_TOKEN
+        except Exception:
+            pass
+
+    # Final check with a clear message
+    if not BOT_TOKEN:
+        raise RuntimeError(
+            "BOT_TOKEN not found, set env BOT_TOKEN, or TELEGRAM_BOT_TOKEN, "
+            "or create local_config.py with TELEGRAM_TOKEN = '123:ABC...'"
+        )
     app = build_app()
     # set UI commands
     try:
